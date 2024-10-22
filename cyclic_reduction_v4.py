@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import csr_matrix, lil_matrix, block_diag
+from scipy.sparse import csr_matrix, lil_matrix, vstack, hstack, save_npz, load_npz, block_diag
 from scipy.sparse.linalg import inv, spsolve
 from concurrent.futures import ProcessPoolExecutor
 import time
@@ -36,7 +36,7 @@ def cyclic_reduction_parallel(A, f, block_size, max_depth=3, depth=0):
         return spsolve(A, f)
     
     B = lil_matrix((m, n))
-    g = np.zeros(m)
+    g = lil_matrix((m,1))
 
     # Even indices diagonal (process the even diagonal blocks first)
     for i in range(n_even):
@@ -106,40 +106,38 @@ def cyclic_reduction_parallel(A, f, block_size, max_depth=3, depth=0):
 
 if __name__ == "__main__":
     # Load harmonic oscillator tests
-    #A, f, u = np.load("harmonic_oscillator/A_1000.npy"), np.load("harmonic_oscillator/f_1000.npy"), np.load("harmonic_oscillator/x_1000.npy")
-    A, f, u = np.load("harmonic_oscillator/A_4000.npy"), np.load("harmonic_oscillator/f_4000.npy"), np.load("harmonic_oscillator/x_4000.npy")
-    #A, f, u = np.load("harmonic_oscillator/A_8000.npy"), np.load("harmonic_oscillator/f_8000.npy"), np.load("harmonic_oscillator/x_8000.npy")
-
-    A_csr = csr_matrix(A)
+    A, f, x = load_npz("sparse_harmonic/A_1000.npz"), load_npz("sparse_harmonic/f_1000.npz"), load_npz("sparse_harmonic/x_1000.npz")
+    #A, f, x = load_npz("sparse_harmonic/A_16000.npz"), load_npz("sparse_harmonic/f_16000.npz"), load_npz("sparse_harmonic/x_16000.npz")
+    
     block_size = 4
-    print("Sizes A, f, u: ", A.shape, f.shape, u.shape,"\n")
+    print("Sizes A, f, u: ", A.shape, f.shape, x.shape,"\n")
     
     start0 = time.time()
     print("Solving with cyclic reduction, parallelism depth 0 (1 worker)")
-    sol0 = cyclic_reduction_parallel(A_csr, f, block_size, max_depth=0)
+    sol0 = cyclic_reduction_parallel(A, f, block_size, max_depth=0)
     end0 = time.time()
-    print(f"Error: ", np.linalg.norm(u-sol0))
+    print(f"Error: ", np.linalg.norm(x-sol0))
     print(f"Elapsed time for cyclic reduction, parallelism: {end0-start0} \n")
 
     
     start1 = time.time()
     print("Solving with cyclic reduction, parallelism depth 1 (2 workers)")
-    sol1 = cyclic_reduction_parallel(A_csr, f, block_size, max_depth=1)
+    sol1 = cyclic_reduction_parallel(A, f, block_size, max_depth=1)
     end1 = time.time()
-    print(f"Error: ", np.linalg.norm(u-sol1))
+    print(f"Error: ", np.linalg.norm(x-sol1))
     print(f"Elapsed time for cyclic reduction, parallelism: {end1-start1} \n")
 
 
     # start2 = time.time()
     # print("Solving with cyclic reduction, parallelism depth 2 (4 workers)")
-    # sol2 = cyclic_reduction_parallel(A_csr, f, max_depth=2)
+    # sol2 = cyclic_reduction_parallel(A, f, max_depth=2)
     # end2 = time.time()
-    # print(f"Error: ", np.linalg.norm(u-sol2))
+    # print(f"Error: ", np.linalg.norm(x-sol2))
     # print(f"Elapsed time for cyclic reduction, parallelism: {end2-start2} \n")
 
     start3 = time.time()
     print("Solving with cyclic reduction, parallelism depth 3 (8 workers)")
-    sol3 = cyclic_reduction_parallel(A_csr, f, block_size, max_depth=3)
+    sol3 = cyclic_reduction_parallel(A, f, block_size, max_depth=3)
     end3 = time.time()
-    print(f"Error: ", np.linalg.norm(u-sol3))
+    print(f"Error: ", np.linalg.norm(x-sol3))
     print(f"Elapsed time for cyclic reduction, parallelism: {end3-start3} \n")
