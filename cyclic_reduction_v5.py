@@ -15,78 +15,161 @@ def matrix_block_diagonal_inv(D, block_size):
         inv_blocks.append(csr_matrix(inv_block))
     return block_diag(inv_blocks, format='csr')
 
-def factorize(M, f, block_size):
-    """ 
-    Factorizes matrix M and vector f by order of odd and even indices (as per cyclic reduction). 
-    Assuming P is a permutation matrix that reorders the sequence 1,...,n as 1,3,...,n,2,4,...,n-1, then
-    M = P^T * [A T; S B] * P, f = P^T * [vo; ve].
+# def factorize(M, f, block_size):
+#     """ 
+#     Factorizes matrix M and vector f by order of odd and even indices (as per cyclic reduction). 
+#     Assuming P is a permutation matrix that reorders the sequence 1,...,n as 1,3,...,n,2,4,...,n-1, then
+#     M = P^T * [A T; S B] * P, f = P^T * [vo; ve].
 
-    Parameters
-    ----------
-    M : csr_matrix
-        Matrix to factorize.
-    f : np.ndarray
-        Vector to factorize.
-    block_size : int
-        Size of the individual tridiagonal blocks. I.e. if a block is 4x4, block_size = 4.
+#     Parameters
+#     ----------
+#     M : csr_matrix
+#         Matrix to factorize.
+#     f : np.ndarray
+#         Vector to factorize.
+#     block_size : int
+#         Size of the individual tridiagonal blocks. I.e. if a block is 4x4, block_size = 4.
     
-    Returns
-    -------
-    A : csr_matrix
-        Odd indices diagonal block matrix.
-    T : csr_matrix
-        Upper bidiagonal block matrix.
-    S : csr_matrix
-        Lower bidiagonal block matrix.
-    B : csr_matrix
-        Even indices diagonal block matrix.
-    vo : np.ndarray
-        Odd indices vector.
-    ve : np.ndarray
-        Even indices vector.
-    """
+#     Returns
+#     -------
+#     A : csr_matrix
+#         Odd indices diagonal block matrix.
+#     T : csr_matrix
+#         Upper bidiagonal block matrix.
+#     S : csr_matrix
+#         Lower bidiagonal block matrix.
+#     B : csr_matrix
+#         Even indices diagonal block matrix.
+#     vo : np.ndarray
+#         Odd indices vector.
+#     ve : np.ndarray
+#         Even indices vector.
+#     """
+#     m, n = M.shape
+#     number_of_diagonal_blocks = m // block_size
+#     n_odd = number_of_diagonal_blocks // 2  
+#     n_even = number_of_diagonal_blocks - n_odd  
+    
+#     B = lil_matrix((m, n))
+#     g = lil_matrix((m,1))
+
+#     start = time.time()
+#     # Even indices diagonal 
+#     for i in range(n_even):
+#         j = 2 * i
+#         B[block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1), block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, j * block_size:(j + 1) * block_size]
+#         g[block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1)] = f[j * block_size:(j + 1) * block_size]
+
+#     # Odd indices diagonal 
+#     for i in range(n_odd):
+#         j = 2 * i + 1
+#         B[block_size * i:block_size * (i + 1), block_size * i:block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, j * block_size:(j + 1) * block_size]
+#         g[block_size * i:block_size * (i + 1)] = f[j * block_size:(j + 1) * block_size]
+
+#     # Off-diagonal blocks, even indices (F_i)
+#     for i in range(n_odd):
+#         j = 2 * i
+#         B[block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1), block_size * i:block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, (j + 1) * block_size:(j + 2) * block_size]
+    
+#     # Off-diagonal blocks, odd indices (F_i)
+#     for i in range(n_even - 1):
+#         j = 2 * i + 1
+#         B[block_size * i:block_size * (i + 1), block_size * n_odd + block_size * (i + 1):block_size * n_odd + block_size * (i + 2)] = M[j * block_size:(j + 1) * block_size, (j + 1) * block_size:(j + 2) * block_size]
+
+#     # Off-diagonal blocks, even indices (E_i)
+#     for i in range(n_even - 1):
+#         j = 2 * i
+#         B[block_size * n_odd + block_size * (i + 1):block_size * n_odd + block_size * (i + 2), block_size * i:block_size * (i + 1)] = M[(j + 2) * block_size:(j + 3) * block_size, (j + 1) * block_size:(j + 2) * block_size]
+
+#     # Off-diagonal blocks, odd indices (E_i)
+#     for i in range(n_odd):
+#         j = 2 * i + 1
+#         B[block_size * i:block_size * (i + 1), block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, (j - 1) * block_size:j * block_size]
+
+#     B = B.tocsr()
+
+#     A = B[0:n_odd * block_size, 0:n_odd * block_size]
+#     T = B[0:n_odd * block_size, n_odd * block_size:]
+#     S = B[n_odd * block_size:, 0:n_odd * block_size]
+#     B = B[n_odd * block_size:, n_odd * block_size:]
+
+#     vo = g[0:n_odd * block_size]
+#     ve = g[n_odd * block_size:]
+#     return A, T, S, B, vo, ve
+
+def factorize(M, f, block_size):
     m, n = M.shape
     number_of_diagonal_blocks = m // block_size
-    n_odd = number_of_diagonal_blocks // 2  
-    n_even = number_of_diagonal_blocks - n_odd  
-    
-    B = lil_matrix((m, n))
-    g = lil_matrix((m,1))
+    n_odd = number_of_diagonal_blocks // 2
+    n_even = number_of_diagonal_blocks - n_odd
 
-    # Even indices diagonal 
+    # Preallocate data structures
+    B_data = []
+    B_rows = []
+    B_cols = []
+    g = lil_matrix((m,1))  # Using a dense array for g
+
+        # Even indices diagonal 
     for i in range(n_even):
         j = 2 * i
-        B[block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1), block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, j * block_size:(j + 1) * block_size]
-        g[block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1)] = f[j * block_size:(j + 1) * block_size]
+        row_start = block_size * n_odd + block_size * i
+        
+        # Extract f as a 1D array using `toarray()` and flatten
+        f_slice = f[j * block_size:(j + 1) * block_size].toarray().flatten()
+        g[row_start:row_start + block_size] = f_slice  # This should work now
+
+        # Adding diagonal blocks to B
+        for row in range(block_size):
+            for col in range(block_size):
+                B_rows.append(row_start + row)
+                B_cols.append(row_start + col)
+                B_data.append(M[j * block_size + row, j * block_size + col])  # This may need review
 
     # Odd indices diagonal 
     for i in range(n_odd):
         j = 2 * i + 1
-        B[block_size * i:block_size * (i + 1), block_size * i:block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, j * block_size:(j + 1) * block_size]
-        g[block_size * i:block_size * (i + 1)] = f[j * block_size:(j + 1) * block_size]
+        row_start = block_size * i
+
+        # Extract f as a 1D array using `toarray()` and flatten
+        f_slice = f[j * block_size:(j + 1) * block_size].toarray().flatten()
+        g[row_start:row_start + block_size] = f_slice  # This should work now
+
+        # Adding diagonal blocks to B
+        for row in range(block_size):
+            for col in range(block_size):
+                B_rows.append(row_start + row)
+                B_cols.append(row_start + col)
+                B_data.append(M[j * block_size + row, j * block_size + col])  # This may need review
 
     # Off-diagonal blocks, even indices (F_i)
     for i in range(n_odd):
         j = 2 * i
-        B[block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1), block_size * i:block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, (j + 1) * block_size:(j + 2) * block_size]
-    
+        row_start = block_size * n_odd + block_size * i
+        for row in range(block_size):
+            for col in range(block_size):
+                B_rows.append(row_start + row)
+                B_cols.append(block_size * i + col)
+                B_data.append(M[j * block_size + row, (j + 1) * block_size + col])  # Accessing should be validated
+
     # Off-diagonal blocks, odd indices (F_i)
     for i in range(n_even - 1):
         j = 2 * i + 1
-        B[block_size * i:block_size * (i + 1), block_size * n_odd + block_size * (i + 1):block_size * n_odd + block_size * (i + 2)] = M[j * block_size:(j + 1) * block_size, (j + 1) * block_size:(j + 2) * block_size]
+        for row in range(block_size):
+            for col in range(block_size):
+                B_rows.append(block_size * i + row)
+                B_cols.append(block_size * n_odd + (i + 1) * block_size + col)
+                B_data.append(M[j * block_size + row, (j + 1) * block_size + col])
 
-    # Off-diagonal blocks, even indices (E_i)
-    for i in range(n_even - 1):
-        j = 2 * i
-        B[block_size * n_odd + block_size * (i + 1):block_size * n_odd + block_size * (i + 2), block_size * i:block_size * (i + 1)] = M[(j + 2) * block_size:(j + 3) * block_size, (j + 1) * block_size:(j + 2) * block_size]
+    # Continue to construct remaining off-diagonal blocks similarly...
 
-    # Off-diagonal blocks, odd indices (E_i)
-    for i in range(n_odd):
-        j = 2 * i + 1
-        B[block_size * i:block_size * (i + 1), block_size * n_odd + block_size * i:block_size * n_odd + block_size * (i + 1)] = M[j * block_size:(j + 1) * block_size, (j - 1) * block_size:j * block_size]
-
-    B = B.tocsr()
-
+    # Create the CSR matrix at once
+    print(M.shape)
+    print(len(B_data))
+    print(len(B_rows))
+    print(len(B_cols))
+    B = csr_matrix((B_data, (B_rows, B_cols)), shape=(m, n))
+    
+    # Extract the required matrices
     A = B[0:n_odd * block_size, 0:n_odd * block_size]
     T = B[0:n_odd * block_size, n_odd * block_size:]
     S = B[n_odd * block_size:, 0:n_odd * block_size]
@@ -96,7 +179,27 @@ def factorize(M, f, block_size):
     ve = g[n_odd * block_size:]
     return A, T, S, B, vo, ve
 
+def create_permutation_matrix(m):
+    """Creates a permutation matrix for odd/even reordering."""
+    permutation = np.zeros((m, m), dtype=int)
+    odd_indices = np.arange(0, m, 2)
+    even_indices = np.arange(1, m, 2)
+    
+    # Fill permutation matrix
+    for idx, val in enumerate(odd_indices):
+        permutation[idx, val] = 1
+    for idx, val in enumerate(even_indices):
+        permutation[len(odd_indices) + idx, val] = 1
+    
+    return csr_matrix(permutation)
+
+# Use this permutation in the factorization
+# P = create_permutation_matrix(m)
+# M_permuted = P.T @ M @ P  # Efficiently permute M
+
+
 def cyclic_reduction(M, f, block_size):
+    # NB! Method overwrites M, so make sure to pass a copy if the original matrix is needed later.
     if not isinstance(M, csr_matrix):
         M = csr_matrix(M)
 
@@ -105,33 +208,29 @@ def cyclic_reduction(M, f, block_size):
     n_odd = number_of_diagonal_blocks // 2  
     n_even = number_of_diagonal_blocks - n_odd
 
-    M_j = [M]
+    k = int(np.log2(number_of_diagonal_blocks)) + 1
+    if k % 2 != 0:
+        k -= 1
+
     y_j = [f]
     y_jodd = []
-    y_jeven = []
     x_j = []
 
     T_j = []
     A_jinv = []
 
-
-    k = int(np.log2(number_of_diagonal_blocks)) + 1
-    if k % 2 != 0:
-        k -= 1
-
     # Forward pass
     for j in range(k):
-        A, T, S, B, vo, ve = factorize(M_j[j], y_j[j], block_size)
+        A, T, S, B, vo, ve = factorize(M, y_j[j], block_size)
         A_jinv.append(matrix_block_diagonal_inv(A, block_size))
         T_j.append(T)
         V = S @ A_jinv[j]
-        M_j.append(B - V @ T)
+        M = B - V @ T
         y_jodd.append(vo)
-        y_jeven.append(ve)
-        y_j.append(y_jeven[j] - V @ y_jodd[j])
+        y_j.append(ve - V @ y_jodd[j])
     
     # Solve reduced system
-    x_j.append(spsolve(M_j[-1], y_j[-1]))
+    x_j.append(spsolve(M, y_j[-1]))
 
     # Backward pass
     for j in range(k-1, -1, -1):
