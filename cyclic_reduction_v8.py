@@ -13,125 +13,78 @@ def matrix_block_diagonal_inv(D, block_size):
     n_blocks = D.shape[0] // block_size
     for i in range(n_blocks):
         block = D[i*block_size:(i+1)*block_size, i*block_size:(i+1)*block_size].toarray()
-        # Check if the block is singular
-        if np.linalg.matrix_rank(block) < block_size:
-            print(f"Block is singular.")
-            inv_block = np.zeros((block_size, block_size))
-        else:
-            inv_block = np.linalg.inv(block)
-        inv_blocks.append(csr_matrix(inv_block))
+        inv_block = np.linalg.inv(block)
+        inv_blocks.append(inv_block)
     return block_diag(inv_blocks, format='csr')
 
 def create_full_permutation_matrix(m, block_size):
-    # Total number of blocks
     num_blocks = m // block_size
-
-    # Define the permutation order: [Odd blocks first, 0 block, then even blocks]
     perm_order = []
     
-    # Append odd-indexed blocks first
     for i in range(1, num_blocks, 2):
         perm_order.append(i)
-    
-    # Append the 0-th block next
     perm_order.append(0)
-    
-    # Append even-indexed blocks (other than 0) next
     for i in range(2, num_blocks, 2):
         perm_order.append(i)
 
-    # Prepare lists for the sparse matrix construction
-    data = []
-    rows = []
-    cols = []
+    data, rows, cols = [], [], []
 
-    # Fill the sparse matrix data based on the permutation order
     for new_index, old_index in enumerate(perm_order):
         start_new = new_index * block_size
         start_old = old_index * block_size
         for i in range(block_size):
-            # Set the value for the non-zero entries
-            data.append(1)              # Value to insert (identity matrix entries)
-            rows.append(start_new + i)   # Row index in new position
-            cols.append(start_old + i)   # Column index in old position
+            data.append(1)              
+            rows.append(start_new + i)  
+            cols.append(start_old + i)  
 
-    # Create the sparse matrix using the collected data
     P = csr_matrix((data, (rows, cols)), shape=(m, m))
     return P
 
 def construct_sparse_block_tridiagonal(current_a, current_b, current_c, block_size):
-    p = len(current_a)  # Number of blocks along the diagonal
-    n = p * block_size  # Dimension of the final matrix
+    # Number of blocks
+    p = len(current_a)
     
-    data = []
-    rows = []
-    cols = []
-    # Main diagonal blocks
+    data, row, col = [], [], []
+    # Fill main diagonal blocks
     for i in range(p):
-        row_offset = i * block_size
-        col_offset = i * block_size
-        block = current_a[i]
-        for r in range(block_size):
-            for c in range(block_size):
-                if block[r, c] != 0:
-                    data.append(block[r, c])
-                    rows.append(row_offset + r)
-                    cols.append(col_offset + c)
-
-    # Upper diagonal blocks
+        start = i * block_size
+        block = current_a[i].tocoo()  # Convert each block to COO format for easy indexing
+        data.extend(block.data)
+        row.extend(block.row + start)
+        col.extend(block.col + start)
+    # Fill upper and lower diagonal blocks
     for i in range(p - 1):
-        row_offset = i * block_size
-        col_offset = (i + 1) * block_size
-        block = current_b[i]
+        start_upper = i * block_size
+        start_lower = (i + 1) * block_size
         
-        for r in range(block_size):
-            for c in range(block_size):
-                if block[r, c] != 0:
-                    data.append(block[r, c])
-                    rows.append(row_offset + r)
-                    cols.append(col_offset + c)
+        block_upper = current_b[i].tocoo()
+        data.extend(block_upper.data)
+        row.extend(block_upper.row + start_upper)
+        col.extend(block_upper.col + start_lower)
 
-    # Lower diagonal blocks
-    for i in range(1, p):
-        row_offset = i * block_size
-        col_offset = (i - 1) * block_size
-        block = current_c[i - 1]
-        
-        for r in range(block_size):
-            for c in range(block_size):
-                if block[r, c] != 0:
-                    data.append(block[r, c])
-                    rows.append(row_offset + r)
-                    cols.append(col_offset + c)
+        block_lower = current_c[i].tocoo()
+        data.extend(block_lower.data)
+        row.extend(block_lower.row + start_lower)
+        col.extend(block_lower.col + start_upper)
 
-    # Construct the sparse matrix in CSR format
-    block_tridiagonal_matrix = csr_matrix((data, (rows, cols)), shape=(n, n))
+    block_tridiagonal_matrix = csr_matrix((data, (row, col)), shape=(p * block_size, p * block_size))
     return block_tridiagonal_matrix
 
 def create_Zp_matrix(p, block_size):
-    # Create sparse identity and zero blocks
-    I = csr_matrix(np.eye(block_size))        # Sparse identity block
-    zero_block = csr_matrix((block_size, block_size))  # Sparse zero block
-
-    # Initialize a list to hold each row as a list of sparse blocks
+    I = csr_matrix(np.eye(block_size))        
+    zero_block = csr_matrix((block_size, block_size)) 
     rows = []
 
-    # Build each row with sparse blocks based on the pattern
     for i in range(p + 1):
         row = []
         for j in range(2 * p):
             if (i == 0 and j == 0) or (i > 0 and (j == 2 * i - 1 or j == 2 * i)):
-                # Add a sparse identity matrix at the required positions
                 row.append(I)
             else:
-                # Otherwise, add a sparse zero matrix
                 row.append(zero_block)
-        # Append the constructed sparse row (horizontal stack)
         rows.append(hstack(row))
 
-    # Stack all rows vertically to form the full sparse matrix
     Z_p_sparse = vstack(rows).tocsr()
-    
     return Z_p_sparse
 
 def factorize(M, f, block_size):
@@ -168,45 +121,31 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
         index: index of the process
     """
     # Determine submatrix splitting for processor "index"
-    current_a = []
-    current_c = []
-    current_b = []
+    current_a, current_c, current_b = [], [], []
+
     if index == 0:
         index_1, index_2, index_3, index_4 = get_index_main_M(0,block_size)
         current_a.append(M[index_1:index_2,index_3:index_4])
     else:
-        current_a.append(np.zeros((block_size,block_size)))
+        current_a.append(csr_matrix((block_size,block_size)))
 
     for j in range(1,h+1):
-        index_1, index_2, index_3, index_4 = get_index_main_M(index*h+j,block_size)
-        current_a.append(M[index_1:index_2,index_3:index_4])
-        index_1, index_2, index_3, index_4 = get_index_upper_M(index*h+j,block_size)
-        current_c.append(M[index_1:index_2,index_3:index_4])
-        index_1, index_2, index_3, index_4 = get_index_lower_M(index*h+j,block_size)
-        current_b.append(M[index_1:index_2,index_3:index_4])
+        main_index = get_index_main_M(index*h+j,block_size)
+        upper_index = get_index_upper_M(index*h+j,block_size)
+        lower_index = get_index_lower_M(index*h+j,block_size)
+
+        current_a.append(M[main_index[0]:main_index[1],main_index[2]:main_index[3]])
+        current_c.append(M[upper_index[0]:upper_index[1],upper_index[2]:upper_index[3]])
+        current_b.append(M[lower_index[0]:lower_index[1],lower_index[2]:lower_index[3]])
+
     M = construct_sparse_block_tridiagonal(current_a, current_c, current_b, block_size)
 
-    # Determine subvector splitting for processor "index"
-    if index == 0:
-        index_1, index_2 = get_index_f(0,block_size)
-        y0 = f[index_1:index_2]
-        for j in range(1,h):
-            index_1, index_2 = get_index_f(index*h+j,block_size)
-            y0 = np.concatenate((y0, f[index_1:index_2]))
-        y0 = np.concatenate((y0, np.zeros(block_size)))
-    elif index == p-1:
-        index_1, index_2 = get_index_f(index*h,block_size)
-        y0 = f[index_1:index_2]
-        for j in range(1,h+1):
-            index_1, index_2 = get_index_f(index*h+j,block_size)
-            y0 = np.concatenate((y0, f[index_1:index_2]))
-    else:
-        index_1, index_2 = get_index_f(index*h,block_size)
-        y0 = f[index_1:index_2]
-        for j in range(1,h):
-            index_1, index_2 = get_index_f(index*h+j,block_size)
-            y0 = np.concatenate((y0, f[index_1:index_2]))
-        y0 = np.concatenate((y0, np.zeros(block_size)))
+    y0 = np.zeros((h+1) * block_size)
+    for j in range(h):
+        start, end = get_index_f(index * h + j, block_size)
+        y0[j*block_size:(j+1)*block_size] = f[start:end]
+    if index != p - 1:
+        y0[-block_size:] = 0
 
     y_j = y0
     y_jodd = []
@@ -219,13 +158,14 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
     # Forward pass
     for i in range(k):
         Q, A, T, S, B, vo, ve = factorize(M, y_j,  block_size)
+        Q_j.append(Q)
         A_jinv.append(matrix_block_diagonal_inv(A, block_size))
         T_j.append(T)
+        y_jodd.append(vo)
+
         V = S @ A_jinv[i]
         M = B - V @ T   
-        y_jodd.append(vo)
         y_j = ve - V @ y_jodd[i]
-        Q_j.append(Q)
 
     return Q_j, y_j, y_jodd, T_j, A_jinv, M
 
@@ -233,10 +173,6 @@ def cyclic_reduction_backward_step(x_j, Q_j, y_jodd, T_j, A_jinv, k):
     x_last = x_j
     # Backward pass
     for j in range(k-1, -1, -1):
-        print("A_jinv[j]: ", A_jinv[j].shape)
-        print("y_jodd[j]: ", y_jodd[j].shape)
-        print("T_j[j]: ", T_j[j].shape)
-        print("x_last: ", x_last.shape)
         x_to_add = np.concatenate((A_jinv[j] @ (y_jodd[j] - T_j[j] @ x_last), x_last))
         x_last = Q_j[j].T @ x_to_add
     return x_last
@@ -268,13 +204,12 @@ def scalar_cyclic_reduction(M,f,block_size):
 
     n = m//block_size - 1
     r = int(np.log2(p))
-    k = int(np.log2(n)) 
+    k = int(np.log2(n))
     h = int(2**(k - r)) 
 
     Q_j, y_j, y_jodd, T_j, A_jinv, M_j = cyclic_reduction_forward_step(M, f, p, k-r, h, index, block_size)
 
     x_k = spsolve(M_j, y_j)
-    x_k = x_k.reshape(-1,1)
 
     sol_x = cyclic_reduction_backward_step(x_k, Q_j, y_jodd, T_j, A_jinv, k-r)
 
@@ -345,8 +280,6 @@ def cyclic_redcution_parallel(M, f, p, block_size):
                 x_p.append(sol)
     else:
         return scalar_cyclic_reduction(M,f,block_size)
-
-
     
     # 3.13
     x = np.array([])
@@ -360,17 +293,17 @@ def cyclic_redcution_parallel(M, f, p, block_size):
 
     
 if __name__ == "__main__":
-    profiler = cProfile.Profile()
-    profiler.enable()
+    # profiler = cProfile.Profile()
+    # profiler.enable()
     # Load harmonic oscillator tests. 
     np.set_printoptions(precision=4, suppress=True)
     # TESTS! 2 PROCESSES
     block_size = 4
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
-    #Ns_heavy = [16385,32769,65537,131073,262145,524289]
+    Ns = [16385,32769,65537,131073,262145,524289]
     #processes = [2,4,8]
-    Ns = [129]
-    processes = [1]
+    #Ns = [4097]
+    processes = [8]
 
     for n in Ns:
         for p in processes:
@@ -380,35 +313,16 @@ if __name__ == "__main__":
 
             #A, f, x = load_npz(f"sparse_harmonic/A_test2.npz"), load_npz(f"sparse_harmonic/f_test2.npz"), load_npz(f"sparse_harmonic/x_test2.npz")
 
-            # sol1 = scalar_cyclic_reduction(A,f,block_size)
-            # print(f"Error scalar: ", np.linalg.norm(x.toarray()-sol1.T))
-
             # start = time.time()
-            # p = 1 
-            # sol = cyclic_redcution_parallel(A,f,p,block_size)
+            # sol = spsolve(A,f)
             # end = time.time()
-            # print("Time p=1: ", end-start,"\n")
-
-            # start = time.time()
-            # p = 2
-            # sol = cyclic_redcution_parallel(A,f,p,block_size)
-            # end = time.time()
-            # print("Time p=2: ", end-start,"\n")
-
-            # start = time.time()
-            # p = 4
-            # sol = cyclic_redcution_parallel(A,f,p,block_size)
-            # end = time.time()
-            # print("Time p=4: ", end-start,"\n")
-
+            # print(f"Time spsolve: ", end-start,"\n")
+           
             start = time.time()
-            p = 1
             sol = cyclic_redcution_parallel(A,f,p,block_size)
             end = time.time()
-            print("Time p=8: ", end-start,"\n")
-
-
-            print(f"Error parallel: ", np.linalg.norm(x.toarray()-sol.T))
+            print(f"Time p={p}: ", end-start,"\n")
+            print(f"Error: ", np.linalg.norm(x.toarray()-sol.T))
 
 
             #print("Real solution: ", x.toarray().flatten(),"\n") 
@@ -416,8 +330,8 @@ if __name__ == "__main__":
 
 
 
-    profiler.disable()
-    profiler.print_stats(sort='cumtime')
+    # profiler.disable()
+    # profiler.print_stats(sort='cumtime')
 
 
 
