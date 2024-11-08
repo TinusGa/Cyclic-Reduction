@@ -384,8 +384,8 @@ if __name__ == "__main__":
             start = time.time()
             sol = cyclic_redcution_parallel(A,f,p,block_size)
             end = time.time()
-            print(f"Time p={p}: ", end-start,"\n")
-            print(f"Error: ", np.linalg.norm(x.toarray()-sol.T))
+            print(f"Time p={p}: ", end-start)
+            print(f"Error: ", np.linalg.norm(x.toarray()-sol.T),"\n")
 
 
             #print("Real solution: ", x.toarray().flatten(),"\n") 
