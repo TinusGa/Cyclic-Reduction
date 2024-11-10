@@ -3,6 +3,7 @@ from scipy.sparse import csr_matrix, lil_matrix, vstack, hstack, save_npz, load_
 from scipy.sparse.linalg import inv, spsolve
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Pool, shared_memory
+import matplotlib.pyplot as plt
 import time
 import cProfile
 import pstats
@@ -39,84 +40,6 @@ def create_full_permutation_matrix(m, block_size):
 
     P = csr_matrix((data, (rows, cols)), shape=(m, m))
     return P
-
-def construct_sparse_block_tridiagonal(current_a, current_b, current_c, block_size):
-    # Number of blocks
-    p = len(current_a)
-    
-    data, row, col = [], [], []
-    # Fill main diagonal blocks
-    for i in range(p):
-        start = i * block_size
-        block = current_a[i].tocoo()  # Convert each block to COO format for easy indexing
-        data.extend(block.data)
-        row.extend(block.row + start)
-        col.extend(block.col + start)
-    # Fill upper and lower diagonal blocks
-    for i in range(p - 1):
-        start_upper = i * block_size
-        start_lower = (i + 1) * block_size
-        
-        block_upper = current_b[i].tocoo()
-        data.extend(block_upper.data)
-        row.extend(block_upper.row + start_upper)
-        col.extend(block_upper.col + start_lower)
-
-        block_lower = current_c[i].tocoo()
-        data.extend(block_lower.data)
-        row.extend(block_lower.row + start_lower)
-        col.extend(block_lower.col + start_upper)
-
-    block_tridiagonal_matrix = csr_matrix((data, (row, col)), shape=(p * block_size, p * block_size))
-    return block_tridiagonal_matrix
-
-
-def construct_sparse_block_tridiagonal_direct(index, block_size, M, h):
-    # Initialize lists to store matrix data, rows, and columns
-    data, row, col = [], [], []
-    # Process the first block
-    if index == 0:
-        index_1, index_2, index_3, index_4 = get_index_main_M(0, block_size)
-        block_a = M[index_1:index_2, index_3:index_4].tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row)
-        col.extend(block_a.col)
-    else:
-        # First block for the main diagonal (empty if index != 0)
-        block_a = csr_matrix((block_size, block_size)).tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row)
-        col.extend(block_a.col)
-    
-    # Loop through all other blocks
-    for j in range(1, h + 1):
-        main_index = get_index_main_M(index * h + j, block_size)
-        upper_index = get_index_upper_M(index * h + j, block_size)
-        lower_index = get_index_lower_M(index * h + j, block_size)
-
-        # Main diagonal block
-        block_a = M[main_index[0]:main_index[1], main_index[2]:main_index[3]].tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row + j * block_size)
-        col.extend(block_a.col + j * block_size)
-        
-        # Upper diagonal block
-        block_c = M[upper_index[0]:upper_index[1], upper_index[2]:upper_index[3]].tocoo()
-        data.extend(block_c.data)
-        row.extend(block_c.row + (j-1) * block_size)
-        col.extend(block_c.col + j * block_size)
-        
-        # Lower diagonal block
-        block_b = M[lower_index[0]:lower_index[1], lower_index[2]:lower_index[3]].tocoo()
-        data.extend(block_b.data)
-        row.extend(block_b.row + j * block_size)
-        col.extend(block_b.col + (j-1) * block_size)
-    
-    # Construct the sparse block tridiagonal matrix
-    p = (h + 1)  # Total number of blocks in the main diagonal (including the first block)
-    block_tridiagonal_matrix = csr_matrix((data, (row, col)), shape=(p * block_size, p * block_size))
-    
-    return block_tridiagonal_matrix
 
 
 def create_Zp_matrix(p, block_size):
@@ -156,6 +79,8 @@ def factorize(M, f, block_size):
         
     return Q, A, T, S, B, vo, ve
 
+
+
 # CYCLIC REDUCTION STEPS
 def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
     """ 
@@ -171,35 +96,66 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
     """
     # Determine submatrix splitting for processor "index"
     data, row, col = [], [], []
-    if index == 0:
-        main_index = get_index_main_M(0, block_size)
-        block_a = M[main_index[0]:main_index[1], main_index[2]:main_index[3]].tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row)
-        col.extend(block_a.col)
-    
-    for j in range(1, h + 1):
-        main_index = get_index_main_M(index * h + j, block_size)
-        upper_index = get_index_upper_M(index * h + j, block_size)
-        lower_index = get_index_lower_M(index * h + j, block_size)
 
-        # Main diagonal block
-        block_a = M[main_index[0]:main_index[1], main_index[2]:main_index[3]].tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row + j * block_size)
-        col.extend(block_a.col + j * block_size)
-        
-        # Upper diagonal block
-        block_c = M[upper_index[0]:upper_index[1], upper_index[2]:upper_index[3]].tocoo()
-        data.extend(block_c.data)
-        row.extend(block_c.row + (j-1) * block_size)
-        col.extend(block_c.col + j * block_size)
-        
-        # Lower diagonal block
-        block_b = M[lower_index[0]:lower_index[1], lower_index[2]:lower_index[3]].tocoo()
-        data.extend(block_b.data)
-        row.extend(block_b.row + j * block_size)
-        col.extend(block_b.col + (j-1) * block_size)
+    if index == 0:
+        # main_index = get_index_main_M(0, block_size)
+        # block_a = M[main_index[0]:main_index[1], main_index[2]:main_index[3]].tocoo()
+        # data.extend(block_a.data)
+        # row.extend(block_a.row)
+        # col.extend(block_a.col)
+        row_start, row_end, col_start, col_end = get_index_main_M(0, block_size)
+
+        for r in range(row_start, row_end):
+            row_data_start = M.indptr[r]            
+            row_data_end = M.indptr[r + 1]          
+            row_columns = M.indices[row_data_start:row_data_end]  
+            row_values = M.data[row_data_start:row_data_end]     
+
+            for i, c in enumerate(row_columns):
+                if col_start <= c < col_end:
+                    data.append(row_values[i])
+                    row.append(r - row_start)       
+                    col.append(c - col_start)
+
+    for j in range(1, h + 1):
+        # Main diagonal block indices
+        row_start, row_end, col_start, col_end = get_index_main_M(index * h + j, block_size)
+        for r in range(row_start, row_end):
+            row_data_start = M.indptr[r]
+            row_data_end = M.indptr[r + 1]
+            row_columns = M.indices[row_data_start:row_data_end]
+            row_values = M.data[row_data_start:row_data_end]
+            for i, c in enumerate(row_columns):
+                if col_start <= c < col_end:
+                    data.append(row_values[i])
+                    row.append((r - row_start) + j * block_size)
+                    col.append((c - col_start) + j * block_size)
+
+        # Upper diagonal block indices
+        row_start, row_end, col_start, col_end = get_index_upper_M(index * h + j, block_size)
+        for r in range(row_start, row_end):
+            row_data_start = M.indptr[r]
+            row_data_end = M.indptr[r + 1]
+            row_columns = M.indices[row_data_start:row_data_end]
+            row_values = M.data[row_data_start:row_data_end]
+            for i, c in enumerate(row_columns):
+                if col_start <= c < col_end:
+                    data.append(row_values[i])
+                    row.append((r - row_start) + (j - 1) * block_size)
+                    col.append((c - col_start) + j * block_size)
+
+        # Lower diagonal block indices
+        row_start, row_end, col_start, col_end = get_index_lower_M(index * h + j, block_size)
+        for r in range(row_start, row_end):
+            row_data_start = M.indptr[r]
+            row_data_end = M.indptr[r + 1]
+            row_columns = M.indices[row_data_start:row_data_end]
+            row_values = M.data[row_data_start:row_data_end]
+            for i, c in enumerate(row_columns):
+                if col_start <= c < col_end:
+                    data.append(row_values[i])
+                    row.append((r - row_start) + j * block_size)
+                    col.append((c - col_start) + (j - 1) * block_size)
 
     M = csr_matrix((data, (row, col)), shape=((h+1) * block_size, (h+1) * block_size))
 
@@ -354,7 +310,6 @@ def cyclic_redcution_parallel(M, f, p, block_size):
     return x
 
 
-    
 if __name__ == "__main__":
     # profiler = cProfile.Profile()
     # profiler.enable()
@@ -367,9 +322,11 @@ if __name__ == "__main__":
     #processes = [2,4,8]
     Ns = [8193]
     processes = [1]
+    resses = []
 
     for n in Ns:
         for p in processes:
+        # res = []
             print(f"Number of processes p: {p}, N: {n}")
             A, f, x = load_npz(f"sparse_harmonic_new/A_{n}.npz"), load_npz(f"sparse_harmonic_new/f_{n}.npz"), load_npz(f"sparse_harmonic_new/x_{n}.npz")
             print("Sizes A, f, u: ", A.shape, f.shape, x.shape)
@@ -384,14 +341,23 @@ if __name__ == "__main__":
             start = time.time()
             sol = cyclic_redcution_parallel(A,f,p,block_size)
             end = time.time()
+            # thetime = end-start
+            # res.append(thetime)
             print(f"Time p={p}: ", end-start)
+
+
             print(f"Error: ", np.linalg.norm(x.toarray()-sol.T),"\n")
 
 
             #print("Real solution: ", x.toarray().flatten(),"\n") 
             #print("Computed solution: ", sol.flatten())
+        # resses.append(res)
 
-
+    # plt.figure()
+    # for i in range(len(processes)):
+    #     plt.plot(Ns, resses[i], label=f"p = {processes[i]}")
+    # plt.legend(loc="upper right")
+    # plt.show()
 
     # profiler.disable()
     # profiler.print_stats(sort='cumtime')

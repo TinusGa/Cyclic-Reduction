@@ -458,7 +458,6 @@ def cyclic_redcution_parallel(M, f, p, block_size):
     Z_p = create_Zp_matrix(p,block_size)  
     M_k = Z_p @ M_k @ Z_p.T
     y_k = Z_p @ y_j_p
-    print("M_k parallel: ", M_k.toarray(),"shape: ",M_k.shape, "\n")
     
     # 3.11
     x_k = spsolve(M_k, y_k) 
@@ -515,9 +514,7 @@ def scalar_cyclic_reduction(M,f,block_size):
     h = (n+1)//1
 
     k = int(np.log2(h))-2
-    print("k scalar: ", k, "\n")
     Q_j, y_j, y_jodd, T_j, A_jinv, M = cyclic_reduction_forward_step(M, f, k , block_size)
-    print("M scalar: ", M.toarray(),"shape: ",M.shape, "\n")
     x_k = spsolve(M, y_j[-1])
 
     x_k = x_k.reshape(-1,1)
@@ -538,35 +535,36 @@ if __name__ == "__main__":
     #Ns = [15,31,63,127,255,511,1023,2047,4095,8191]
     #Ns_heavy = [16383,32767,65535,131071,262143,524287]
     #processes = [2,4,8]
-    Ns = [15]
-    processes = [4]
+    Ns = [8191]
+    processes = [1]
 
-    # for n in Ns:
-    #     for p in processes:
-    #         print(f"Number of processes p: {p}, N: {n}")
-    #         A, f, x = load_npz(f"sparse_harmonic/A_{n}.npz"), load_npz(f"sparse_harmonic/f_{n}.npz"), load_npz(f"sparse_harmonic/x_{n}.npz")
+    for n in Ns:
+        for p in processes:
+            print(f"Number of processes p: {p}, N: {n}")
+            A, f, x = load_npz(f"sparse_harmonic/A_{n}.npz"), load_npz(f"sparse_harmonic/f_{n}.npz"), load_npz(f"sparse_harmonic/x_{n}.npz")
 
-    #         #A, f, x = load_npz(f"sparse_harmonic/A_test.npz"), load_npz(f"sparse_harmonic/f_test.npz"), load_npz(f"sparse_harmonic/x_test.npz")
-    #         print("Sizes A, f, u: ", A.shape, f.shape, x.shape)
+            #A, f, x = load_npz(f"sparse_harmonic/A_test.npz"), load_npz(f"sparse_harmonic/f_test.npz"), load_npz(f"sparse_harmonic/x_test.npz")
+            print("Sizes A, f, u: ", A.shape, f.shape, x.shape)
 
-    #         sol1 = scalar_cyclic_reduction(A,f,block_size)
-    #         print(f"Error scalar: ", np.linalg.norm(x.toarray()-sol1.T))
+            # sol1 = scalar_cyclic_reduction(A,f,block_size)
+            # print(f"Error scalar: ", np.linalg.norm(x.toarray()-sol1.T))
+            start = time.time()
+            # sol = cyclic_redcution_parallel(A,f,p,block_size)
+            sol = scalar_cyclic_reduction(A,f,block_size)
+            end = time.time()
+            print(f"Time parallel: {end-start}")
+            print(f"Error parallel: ", np.linalg.norm(x.toarray()-sol.T))
 
-    #         sol = cyclic_redcution_parallel(A,f,p,block_size)
-    #         print(f"Error parallel: ", np.linalg.norm(x.toarray()-sol.T))
-
-    #         print("Real solution: ", x.toarray().flatten(),"\n") 
-    #         print("Computed solution: ", sol.toarray().flatten())
 
             #print("\n")
-    my = np.arange(1,16)
-    Q = create_full_permutation_matrix(15,1)
-    res = Q @ my
-    print(res)
-    my2 = np.arange(0,5)
-    Q2 = create_full_permutation_matrix_inner(5,1)
-    res2 = Q2 @ my2
-    print(res2)
+    # my = np.arange(1,16)
+    # Q = create_full_permutation_matrix(15,1)
+    # res = Q @ my
+    # print(res)
+    # my2 = np.arange(0,5)
+    # Q2 = create_full_permutation_matrix_inner(5,1)
+    # res2 = Q2 @ my2
+    # print(res2)
 
     # profiler.disable()
     # profiler.print_stats(sort='cumtime')
