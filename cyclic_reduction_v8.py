@@ -320,8 +320,8 @@ if __name__ == "__main__":
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
     Ns = [16385,32769,65537,131073,262145,524289]
     #processes = [2,4,8]
-    Ns = [8193]
-    processes = [1]
+    Ns = [524289]
+    processes = [8]
     resses = []
 
     for n in Ns:
@@ -333,10 +333,10 @@ if __name__ == "__main__":
 
             #A, f, x = load_npz(f"sparse_harmonic/A_test2.npz"), load_npz(f"sparse_harmonic/f_test2.npz"), load_npz(f"sparse_harmonic/x_test2.npz")
 
-            # start = time.time()
-            # sol = spsolve(A,f)
-            # end = time.time()
-            # print(f"Time spsolve: ", end-start,"\n")
+            start = time.time()
+            sol = spsolve(A,f)
+            end = time.time()
+            print(f"Time spsolve: ", end-start,"\n")
            
             start = time.time()
             sol = cyclic_redcution_parallel(A,f,p,block_size)
