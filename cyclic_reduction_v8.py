@@ -1,14 +1,17 @@
 import numpy as np
 from scipy.sparse import csr_matrix, lil_matrix, vstack, hstack, save_npz, load_npz, block_diag
-from scipy.sparse.linalg import inv, spsolve
+from scipy.sparse.linalg import inv, spsolve, splu
+from scipy.linalg import lu
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Pool, shared_memory
 import matplotlib.pyplot as plt
 import time
 import cProfile
 import pstats
+from memory_profiler import profile
 
 # HELPER FUNCTIONS
+
 def matrix_block_diagonal_inv(D, block_size):
     inv_blocks = [] 
     n_blocks = D.shape[0] // block_size
@@ -65,8 +68,9 @@ def factorize(M, f, block_size):
     n_even = number_of_diagonal_blocks // 2
 
     Q = create_full_permutation_matrix(m, block_size)
-
     G = Q @ M @ Q.T
+    
+    #LU = splu(G)
     g = Q @ f
     A = G[0:n_even * block_size, 0:n_even * block_size]
     T = G[0:n_even * block_size, n_even * block_size:]
@@ -96,7 +100,6 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
     """
     # Determine submatrix splitting for processor "index"
     data, row, col = [], [], []
-
     if index == 0:
         # main_index = get_index_main_M(0, block_size)
         # block_a = M[main_index[0]:main_index[1], main_index[2]:main_index[3]].tocoo()
@@ -160,7 +163,7 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
     M = csr_matrix((data, (row, col)), shape=((h+1) * block_size, (h+1) * block_size))
 
     y0 = np.zeros((h+1) * block_size)
-    for j in range(h):
+    for j in range(h+1):
         start, end = get_index_f(index * h + j, block_size)
         y0[j*block_size:(j+1)*block_size] = f[start:end]
     if index != p - 1:
@@ -174,7 +177,6 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
 
     Q_j = []
 
-    # Forward pass
     for i in range(k):
         Q, A, T, S, B, vo, ve = factorize(M, y_j,  block_size)
         Q_j.append(Q)
@@ -185,6 +187,7 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
         V = S @ A_jinv[i]
         M = B - V @ T   
         y_j = ve - V @ y_jodd[i]
+        
 
     return Q_j, y_j, y_jodd, T_j, A_jinv, M
 
@@ -216,8 +219,6 @@ def scalar_cyclic_reduction(M,f,block_size):
     m,q = M.shape
     assert m == q, "Matrix must be square"
 
-    #n = m//block_size
-    #h = (n+1)//1
     p = 1
     index = 0
 
@@ -314,13 +315,13 @@ if __name__ == "__main__":
     # profiler = cProfile.Profile()
     # profiler.enable()
     # Load harmonic oscillator tests. 
-    np.set_printoptions(precision=4, suppress=True)
+    np.set_printoptions(precision=2, suppress=True)
     # TESTS! 2 PROCESSES
     block_size = 4
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
     Ns = [16385,32769,65537,131073,262145,524289]
     #processes = [2,4,8]
-    Ns = [524289]
+    Ns = [8193]
     processes = [8]
     resses = []
 
@@ -329,9 +330,9 @@ if __name__ == "__main__":
         # res = []
             print(f"Number of processes p: {p}, N: {n}")
             A, f, x = load_npz(f"sparse_harmonic_new/A_{n}.npz"), load_npz(f"sparse_harmonic_new/f_{n}.npz"), load_npz(f"sparse_harmonic_new/x_{n}.npz")
+            #A, f, x = load_npz(f"sparse_harmonic/A_test2.npz"), load_npz(f"sparse_harmonic/f_test2.npz"), load_npz(f"sparse_harmonic/x_test2.npz")
             print("Sizes A, f, u: ", A.shape, f.shape, x.shape)
 
-            #A, f, x = load_npz(f"sparse_harmonic/A_test2.npz"), load_npz(f"sparse_harmonic/f_test2.npz"), load_npz(f"sparse_harmonic/x_test2.npz")
 
             start = time.time()
             sol = spsolve(A,f)
