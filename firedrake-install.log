@@ -1,0 +1,8 @@
+2024-11-25 15:38:54,125 INFO   Running firedrake-install
+2024-11-25 15:38:54,135 DEBUG  Installer running with: C:\Users\tinus\OneDrive\Desktop\Mastah\La Code\.venv\Scripts\python.exe
+2024-11-25 15:38:54,135 DEBUG  Python version: 3.12.5 (tags/v3.12.5:ff3bc82, Aug  6 2024, 20:45:27) [MSC v.1940 64 bit (AMD64)]
+2024-11-25 15:38:54,135 DEBUG  *** Current environment (output of 'env') ***
+2024-11-25 15:38:54,135 DEBUG  Running command 'env'
+2024-11-25 15:38:54,180 INFO   
+
+Install log saved in C:\Users\tinus\OneDrive\Desktop\Mastah\La Code\firedrake-install.log

@@ -240,16 +240,22 @@ def cyclic_redcution_parallel(M, f, p, block_size):
     # p = number of processes
     if not isinstance(M, csr_matrix):
         M = csr_matrix(M)
+    if isinstance(f, csr_matrix):
+        f = f.toarray()
+        if len(f.shape) > 1:
+            f = f.flatten()
+    if isinstance(f, np.ndarray):
+        if len(f.shape) > 1:
+            f = f.flatten()
 
     m,q = M.shape
     assert m == q, "Matrix must be square"
+    assert m == f.shape[0], "Matrix and vector must have the same size"
 
     n = m//block_size - 1
     r = int(np.log2(p))
     k = int(np.log2(n))
     h = int(2**(k - r))
-    
-    f = f.T.toarray().flatten()
 
     # FORWARD PASS
     M_k_p = []
