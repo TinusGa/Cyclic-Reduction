@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import time
 import cProfile
 import pstats
-from memory_profiler import profile
+import csv
+import os
+#from memory_profiler import profile
 
 # HELPER FUNCTIONS
 
@@ -321,54 +323,63 @@ if __name__ == "__main__":
     # profiler = cProfile.Profile()
     # profiler.enable()
     # Load harmonic oscillator tests. 
-    np.set_printoptions(precision=2, suppress=True)
+    #np.set_printoptions(precision=2, suppress=True)
     # TESTS! 2 PROCESSES
     block_size = 4
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
-    Ns = [16385,32769,65537,131073,262145,524289]
-    #processes = [2,4,8]
-    Ns = [8193]
-    processes = [8]
-    resses = []
+    #Ns = [16385,32769,65537,131073,262145,524289]
+    Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
+    processes = [1,2,4,8,16]
+    #Ns = [8193]
+    #processes = [8]
+    loop = 1
+    n_loops = len(processes)*len(Ns)
+
+    filename = "results/runtimes.csv"
+    if os.path.exists(filename):
+        os.remove(filename)
+        print(f"File '{filename}' has been deleted.")
+    else:
+        print(f"File '{filename}' does not exist.")
+    
+    with open(filename, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["problemSize","nProcessors","BCRSolveTime","spluSolveTime","Error"])
 
     for n in Ns:
         for p in processes:
-        # res = []
-            print(f"Number of processes p: {p}, N: {n}")
+            #print(f"Number of processes p: {p}, N: {n}")
             A, f, x = load_npz(f"sparse_harmonic_new/A_{n}.npz"), load_npz(f"sparse_harmonic_new/f_{n}.npz"), load_npz(f"sparse_harmonic_new/x_{n}.npz")
             #A, f, x = load_npz(f"sparse_harmonic/A_test2.npz"), load_npz(f"sparse_harmonic/f_test2.npz"), load_npz(f"sparse_harmonic/x_test2.npz")
-            print("Sizes A, f, u: ", A.shape, f.shape, x.shape)
 
+            dimA = A.shape
+            dimf = f.shape
+            dimx = x.shape
+            #print("Sizes A, f, u: ", dimA, dimf, dimx)
 
             start = time.time()
             sol = spsolve(A,f)
-            end = time.time()
-            print(f"Time spsolve: ", end-start,"\n")
+            spluSolveTime = time.time() - start 
+            #print(f"Time spsolve: ",spluSolveTime ,"\n")
            
             start = time.time()
             sol = cyclic_redcution_parallel(A,f,p,block_size)
-            end = time.time()
-            # thetime = end-start
-            # res.append(thetime)
-            print(f"Time p={p}: ", end-start)
+            BCRtotalSolveTime = time.time() - start
+  
+            #print(f"Time p={p}: ", BCRtotalSolveTime)
+
+            error = np.linalg.norm(x.toarray()-sol.T)
+            #print(f"Error: ", error,"\n")
+
+            with open(filename, mode="a", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow([dimA[0],p,BCRtotalSolveTime,spluSolveTime,error])
+            
+            print(f"Loop {loop}/{n_loops} complete")
+            loop += 1
 
 
-            print(f"Error: ", np.linalg.norm(x.toarray()-sol.T),"\n")
-
-
-            #print("Real solution: ", x.toarray().flatten(),"\n") 
-            #print("Computed solution: ", sol.flatten())
-        # resses.append(res)
-
-    # plt.figure()
-    # for i in range(len(processes)):
-    #     plt.plot(Ns, resses[i], label=f"p = {processes[i]}")
-    # plt.legend(loc="upper right")
-    # plt.show()
-
-    # profiler.disable()
-    # profiler.print_stats(sort='cumtime')
-
+ 
 
 
 
