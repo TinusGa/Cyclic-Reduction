@@ -238,12 +238,47 @@ def scalar_cyclic_reduction(M,f,block_size):
     return sol_x
 
 # CYCLIC REDUCTION PARALLEL
+# import cProfile
+# import pstats
+# import os
+# from multiprocessing import Pool
+
+def profile_target_function_1(target_function, *args, **kwargs):
+    """
+    A wrapper to profile a target function in a child process.
+    """
+    profiler = cProfile.Profile()
+    profiler.enable()
+    result = target_function(*args, **kwargs)  # Call the actual function
+    profiler.disable()
+
+    # Save raw profiling results
+    profile_filename = f"cprofiler/forward_profile_{os.getpid()}.prof"
+    profiler.dump_stats(profile_filename)
+
+    return result
+
+def profile_target_function_2(target_function, *args, **kwargs):
+    """
+    A wrapper to profile a target function in a child process.
+    """
+    profiler = cProfile.Profile()
+    profiler.enable()
+    result = target_function(*args, **kwargs)  # Call the actual function
+    profiler.disable()
+
+    # Save raw profiling results
+    profile_filename = f"cprofiler/backward_profile_{os.getpid()}.prof"
+    profiler.dump_stats(profile_filename)
+
+    return result
+
 def cyclic_redcution_parallel(M, f, p, block_size):
     parallel_time = 0
     sequential_time = 0
-    
+
     start = time.time()
-    # p = number of processes
+    # Ensure inputs are in the correct format
     if not isinstance(M, csr_matrix):
         M = csr_matrix(M)
     if isinstance(f, csr_matrix):
@@ -254,11 +289,11 @@ def cyclic_redcution_parallel(M, f, p, block_size):
         if len(f.shape) > 1:
             f = f.flatten()
 
-    m,q = M.shape
+    m, q = M.shape
     assert m == q, "Matrix must be square"
     assert m == f.shape[0], "Matrix and vector must have the same size"
 
-    n = m//block_size - 1
+    n = m // block_size - 1
     r = int(np.log2(p))
     k = int(np.log2(n))
     h = int(2**(k - r))
@@ -271,14 +306,18 @@ def cyclic_redcution_parallel(M, f, p, block_size):
     A_jinv_p = []
     Q_p = []
 
-    forward_args = [(M, f, p, k-r, h, i, block_size) for i in range(p)]
+    forward_args = [(M, f, p, k - r, h, i, block_size) for i in range(p)]
     end = time.time()
     sequential_time += end - start
 
     start = time.time()
     if p != 1:
         with Pool(p) as pool:
-            forward_results = pool.starmap(cyclic_reduction_forward_step, forward_args)
+            # Use profile wrapper to profile child processes
+            forward_results = pool.starmap(
+                profile_target_function_1,
+                [(cyclic_reduction_forward_step,) + args for args in forward_args]
+            )
             end = time.time()
             parallel_time += end - start
 
@@ -290,35 +329,40 @@ def cyclic_redcution_parallel(M, f, p, block_size):
                 A_jinv_p.append(A_jinv)
                 M_k_p.append(M_j)
                 y_j_p.append(y_j)
-            
-            
 
-            M_k = block_diag(M_k_p,format='csr')
+            M_k = block_diag(M_k_p, format="csr")
             y_k = np.concatenate(y_j_p)
 
             # 3.10
-            Z_p = create_Zp_matrix(p,block_size)  
+            Z_p = create_Zp_matrix(p, block_size)
 
             M_k = Z_p @ M_k @ Z_p.T
             y_k = Z_p @ y_k
-            
+
             # 3.11
-            x_k = spsolve(M_k, y_k) 
+            x_k = spsolve(M_k, y_k)
 
             # 3.12
             x_k_list = []
-            for i in range (0,p):
-                index_1 = get_index_f(i,block_size)[0]
-                index_2 = get_index_f(i+1,block_size)[1]
+            for i in range(0, p):
+                index_1 = get_index_f(i, block_size)[0]
+                index_2 = get_index_f(i + 1, block_size)[1]
                 x_k_list.append(x_k[index_1:index_2])
 
             # BACKWARD PASS
             x_p = []
-            backward_args = [(x_k_list[i], Q_p[i], y_jodd_p[i], T_j_p[i], A_jinv_p[i], k-r) for i in range(p)]
+            backward_args = [
+                (x_k_list[i], Q_p[i], y_jodd_p[i], T_j_p[i], A_jinv_p[i], k - r)
+                for i in range(p)
+            ]
             end = time.time()
             sequential_time += end - start
+
             start = time.time()
-            backward_results = pool.starmap(cyclic_reduction_backward_step, backward_args)
+            backward_results = pool.starmap(
+                profile_target_function_2,
+                [(cyclic_reduction_backward_step,) + args for args in backward_args],
+            )
             end = time.time()
             parallel_time += end - start
 
@@ -326,8 +370,8 @@ def cyclic_redcution_parallel(M, f, p, block_size):
             for sol in backward_results:
                 x_p.append(sol)
     else:
-        return scalar_cyclic_reduction(M,f,block_size)
-    
+        return scalar_cyclic_reduction(M, f, block_size)
+
     # 3.13
     x = np.array([])
     for i in range(p):
@@ -337,11 +381,27 @@ def cyclic_redcution_parallel(M, f, p, block_size):
             x = np.concatenate((x, x_p[i][block_size:]))
     end = time.time()
     sequential_time += end - start
-    print(f"Sequential time: {sequential_time}, Parallel time: {parallel_time}")
-    return x
+    return x, parallel_time, sequential_time
 
+def clear_cprofiler_folder(folder_path):
+    """
+    Deletes all files in the specified folder.
 
+    Args:
+        folder_path (str): Path to the folder to be cleared.
+    """
+    if not os.path.exists(folder_path):
+        print(f"The folder {folder_path} does not exist.")
+        return
 
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+                print(f"Deleted: {file_path}")
+        except Exception as e:
+            print(f"Error deleting {file_path}: {e}")
 
 if __name__ == "__main__":
     # profiler = cProfile.Profile()
@@ -350,7 +410,7 @@ if __name__ == "__main__":
     #np.set_printoptions(precision=2, suppress=True)
     # TESTS! 2 PROCESSES
     block_size = 4
-    Ns = [262145]
+    Ns = [8193]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
     #Ns = [16385,32769,65537,131073,262145,524289]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
@@ -358,8 +418,12 @@ if __name__ == "__main__":
     #processes = [1,2,4,8,16]
 
     test_problem = False
-    print_to_terminal = False
+    print_to_terminal = True
     write_to_csv = False
+    cprofiler = False
+
+    if cprofiler:
+        clear_cprofiler_folder("cprofiler")
 
     loop = 1
     n_loops = len(processes)*len(Ns)
@@ -373,7 +437,7 @@ if __name__ == "__main__":
         
         with open(filename, mode="w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(["problemSize","nProcessors","BCRSolveTime","spluSolveTime","Error"])
+            writer.writerow(["problemSize","nProcessors","BCRSolveTime","spluSolveTime","Error","parallelTime","sequentialTime"])
 
     for n in Ns:
         for p in processes:
@@ -395,7 +459,7 @@ if __name__ == "__main__":
                 print(f"Time spsolve: ",spluSolveTime ,"\n")
            
             start = time.time()
-            sol = cyclic_redcution_parallel(A,f,p,block_size)
+            sol, parallel_time, sequential_time = cyclic_redcution_parallel(A,f,p,block_size)
             BCRtotalSolveTime = time.time() - start
             if print_to_terminal:
                 print(f"Time p={p}: ", BCRtotalSolveTime)
@@ -407,14 +471,23 @@ if __name__ == "__main__":
             if write_to_csv:
                 with open(filename, mode="a", newline="") as file:
                     writer = csv.writer(file)
-                    writer.writerow([dimA[0],p,BCRtotalSolveTime,spluSolveTime,error])
+                    writer.writerow([dimA[0],p,BCRtotalSolveTime,spluSolveTime,error,parallel_time,sequential_time])
             
                 print(f"Loop {loop}/{n_loops} complete")
                 loop += 1
 
+    if cprofiler:
+        profile_folder = "cprofiler"
 
- 
+        profile_files = [
+            os.path.join(profile_folder, f)
+            for f in os.listdir(profile_folder)
+            if f.endswith(".prof")
+        ]
+        stats = pstats.Stats(profile_files[0])
+        for file in profile_files[1:]:
+            stats.add(file)
+
+        stats.sort_stats("time").print_stats(20)  # Top 20 time-consuming functions
 
 
-
-    
