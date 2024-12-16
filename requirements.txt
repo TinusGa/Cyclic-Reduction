@@ -3,3 +3,4 @@ scipy
 matplotlib
 memory_profiler
 tqdm
+line_profiler

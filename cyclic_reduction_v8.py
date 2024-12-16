@@ -215,6 +215,7 @@ def get_index_lower_M(i,block_size):
 
 # SCALAR CYCLIC REDUCTION
 def scalar_cyclic_reduction(M,f,block_size):
+    start = time.time()
     if not isinstance(M, csr_matrix):
         M = csr_matrix(M)
     
@@ -234,8 +235,8 @@ def scalar_cyclic_reduction(M,f,block_size):
     x_k = spsolve(M_j, y_j)
 
     sol_x = cyclic_reduction_backward_step(x_k, Q_j, y_jodd, T_j, A_jinv, k-r)
-
-    return sol_x
+    end = time.time()
+    return sol_x, 0, end - start
 
 # CYCLIC REDUCTION PARALLEL
 def cyclic_redcution_parallel(M, f, p, block_size):
@@ -337,9 +338,7 @@ def cyclic_redcution_parallel(M, f, p, block_size):
             x = np.concatenate((x, x_p[i][block_size:]))
     end = time.time()
     sequential_time += end - start
-    print(f"Sequential time: {sequential_time}, Parallel time: {parallel_time}")
-    return x
-
+    return x, parallel_time, sequential_time
 
 
 
@@ -350,7 +349,7 @@ if __name__ == "__main__":
     #np.set_printoptions(precision=2, suppress=True)
     # TESTS! 2 PROCESSES
     block_size = 4
-    Ns = [262145]
+    Ns = [8193]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
     #Ns = [16385,32769,65537,131073,262145,524289]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
@@ -359,7 +358,14 @@ if __name__ == "__main__":
 
     test_problem = False
     print_to_terminal = False
+    print_parallel_and_sequential_time = False
     write_to_csv = False
+    cprofiler = False
+
+    if cprofiler:
+        profiler = cProfile.Profile()
+        profiler.enable()
+        processes = [1]
 
     loop = 1
     n_loops = len(processes)*len(Ns)
@@ -367,13 +373,12 @@ if __name__ == "__main__":
         filename = "results/runtimes.csv"
         if os.path.exists(filename):
             os.remove(filename)
-            print(f"File '{filename}' has been deleted.")
         else:
             print(f"File '{filename}' does not exist.")
         
         with open(filename, mode="w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(["problemSize","nProcessors","BCRSolveTime","spluSolveTime","Error"])
+            writer.writerow(["problemSize","nProcessors","BCRSolveTime","spluSolveTime","Error", "Parallel time", "Sequential time"])
 
     for n in Ns:
         for p in processes:
@@ -395,7 +400,7 @@ if __name__ == "__main__":
                 print(f"Time spsolve: ",spluSolveTime ,"\n")
            
             start = time.time()
-            sol = cyclic_redcution_parallel(A,f,p,block_size)
+            sol, parallel_time, sequential_time = cyclic_redcution_parallel(A,f,p,block_size)
             BCRtotalSolveTime = time.time() - start
             if print_to_terminal:
                 print(f"Time p={p}: ", BCRtotalSolveTime)
@@ -407,10 +412,18 @@ if __name__ == "__main__":
             if write_to_csv:
                 with open(filename, mode="a", newline="") as file:
                     writer = csv.writer(file)
-                    writer.writerow([dimA[0],p,BCRtotalSolveTime,spluSolveTime,error])
+                    writer.writerow([dimA[0],p,BCRtotalSolveTime,spluSolveTime,error, parallel_time, sequential_time])
             
                 print(f"Loop {loop}/{n_loops} complete")
                 loop += 1
+
+            if print_parallel_and_sequential_time:
+                print(f"Parallel time: {parallel_time}, Sequential time: {sequential_time}")
+
+    if cprofiler:
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumulative')
+        stats.sort_stats("time").print_stats(20)
 
 
  
