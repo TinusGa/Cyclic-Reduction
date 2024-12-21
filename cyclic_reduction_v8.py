@@ -10,6 +10,7 @@ import cProfile
 import pstats
 import csv
 import os
+from tqdm import tqdm
 #from memory_profiler import profile
 
 # HELPER FUNCTIONS
@@ -352,13 +353,13 @@ if __name__ == "__main__":
     Ns = [8193]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
     #Ns = [16385,32769,65537,131073,262145,524289]
-    #Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
-    Ns = [17,33,129,257,513,1025,2049,4097,8193,16385]
+    Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289,1048577,2097153]
+    #Ns = [17,33,129,257,513,1025,2049,4097,8193,16385]
     #processes = [8]
     processes = [1,2,4,8,16]
 
     test_problem = False
-    print_to_terminal = True
+    print_to_terminal = False
     print_parallel_and_sequential_time = False
     write_to_csv = True
     cprofiler = False
@@ -368,8 +369,8 @@ if __name__ == "__main__":
         profiler.enable()
         processes = [1]
 
-    loop = 1
-    n_loops = len(processes)*len(Ns)
+    #loop = 1
+    #n_loops = len(processes)*len(Ns)
     if write_to_csv:
         filename = "results/runtimes.csv"
         if os.path.exists(filename):
@@ -381,7 +382,7 @@ if __name__ == "__main__":
             writer = csv.writer(file)
             writer.writerow(["problemSize","nProcessors","BCRSolveTime","spluSolveTime","Error", "Parallel time", "Sequential time"])
 
-    for n in Ns:
+    for n in tqdm(Ns):
         for p in processes:
             if print_to_terminal:
                 print(f"Number of processes p: {p}, N: {n}")
@@ -415,8 +416,8 @@ if __name__ == "__main__":
                     writer = csv.writer(file)
                     writer.writerow([dimA[0],p,BCRtotalSolveTime,spluSolveTime,error, parallel_time, sequential_time])
             
-                print(f"Loop {loop}/{n_loops} complete")
-                loop += 1
+                #print(f"Loop {loop}/{n_loops} complete")
+                #loop += 1
 
             if print_parallel_and_sequential_time:
                 print(f"Parallel time: {parallel_time}, Sequential time: {sequential_time}")
