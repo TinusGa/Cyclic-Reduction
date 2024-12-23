@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import csr_matrix, lil_matrix, vstack, hstack, save_npz, load_npz, block_diag
+from scipy.sparse import csr_matrix, csc_matrix, lil_matrix, vstack, hstack, save_npz, load_npz, block_diag, identity
 from scipy.sparse.linalg import inv, spsolve, splu
 from scipy.linalg import lu
 from concurrent.futures import ProcessPoolExecutor
@@ -183,10 +183,10 @@ def cyclic_reduction_forward_step(M, f, p, k, h, index, block_size):
     for i in range(k):
         Q, A, T, S, B, vo, ve = factorize(M, y_j,  block_size)
         Q_j.append(Q)
+        #A_jinv.append(spsolve(A, identity(A.shape[0],format='csr')))
         A_jinv.append(matrix_block_diagonal_inv(A, block_size))
         T_j.append(T)
         y_jodd.append(vo)
-
         V = S @ A_jinv[i]
         M = B - V @ T   
         y_j = ve - V @ y_jodd[i]
@@ -350,13 +350,13 @@ if __name__ == "__main__":
     #np.set_printoptions(precision=2, suppress=True)
     # TESTS! 2 PROCESSES
     block_size = 4
-    Ns = [8193]
+    #Ns = [524289]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193]
     #Ns = [16385,32769,65537,131073,262145,524289]
-    Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289,1048577]
+    Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193,16385]
     #processes = [8]
-    processes = [1,2,4,8,16]
+    processes = [1,2,4,8]
 
     test_problem = False
     print_to_terminal = False
