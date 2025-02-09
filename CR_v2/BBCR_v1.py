@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix, csc_matrix, lil_matrix, vstack, hstack, save_npz, load_npz, block_diag, identity, random
 from scipy.sparse.linalg import inv, spsolve, splu
-from scipy.linalg import lu
+from scipy.linalg import lu, lu_factor, lu_solve
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Pool, shared_memory
 import matplotlib.pyplot as plt
@@ -149,12 +149,31 @@ def forward_placeholder(M, f, block_size : int, processors : int, B_s = [], A_s 
         A_s.append(A1)
         f_s.append(f1)
 
+        ####################
+        # Convert blocks to dense arrays if they aren’t already.
+        B1_dense = B1.toarray() if hasattr(B1, "toarray") else B1
+        A1_dense = A1.toarray() if hasattr(A1, "toarray") else A1
+        B2_dense = B2.toarray() if hasattr(B2, "toarray") else B2
+        A2_dense = A2.toarray() if hasattr(A2, "toarray") else A2
+        f1_dense = f1.toarray() if hasattr(f1, "toarray") else f1
+        f2_dense = f2.toarray() if hasattr(f2, "toarray") else f2
+
+        # Use LU factorization with pivoting to "solve" for the necessary inverses.
+        lu_A1, piv_A1 = lu_factor(A1_dense)
+        lu_B2, piv_B2 = lu_factor(B2_dense)
+
+        # Instead of explicitly forming inverses, we solve linear systems:
+        new_B1 = lu_solve((lu_A1, piv_A1), B1_dense)
+        new_A1 = -lu_solve((lu_B2, piv_B2), A2_dense)
+        new_f1 = lu_solve((lu_A1, piv_A1), f1_dense) - lu_solve((lu_B2, piv_B2), f2_dense)
+        ####################
+
         # Compute inverses and values for the next depth. This is equivalent to removing all odd indices from the input
-        B2_inv = inv(B2)
-        A1_inv = inv(A1)
-        new_B1 = A1_inv@B1
-        new_A1 = -B2_inv@A2
-        new_f1 = A1_inv@f1 - B2_inv@f2
+        # B2_inv = inv(B2)
+        # A1_inv = inv(A1)
+        # new_B1 = A1_inv@B1
+        # new_A1 = -B2_inv@A2
+        # new_f1 = A1_inv@f1 - B2_inv@f2
 
         # Set the new values to obtain a reduced system of half the original size
         j = i//2
@@ -193,13 +212,12 @@ if __name__ == "__main__":
     block_size = 4
     number_of_processors = 8
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
-
+    number_of_blocks_list = [33]
     # Load pre-generated matrix and RHS vector
     for number_of_blocks in number_of_blocks_list:
         print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}")
         save_folder = f"Samples_to_test"
         M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
-
         start = time.time()
         x_sol = placeholder_name(M,f,block_size=block_size,processors=number_of_processors)
         end = time.time()
