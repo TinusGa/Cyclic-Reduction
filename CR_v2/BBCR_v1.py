@@ -67,11 +67,6 @@ def placeholder_name(M, f, block_size : int, processors : int):
     nbyp = n // processors 
     assert ((nbyp & (nbyp-1) == 0) and nbyp != 0), f"M must have size (n+1)*block_size x (n+1)*block_size, where n = p * 2**k. n/p is not a power of two."
     number_of_steps = int(np.log2(nbyp)) # Number of steps in the forward step and backward step for each processor
-
-    row_index_start = block_size
-    row_index_end = block_size*(1+nbyp)
-    col_index_start = 0
-    col_index_end = block_size*(nbyp+1)
     
     # Divide among the processors
     M_k_list = []
@@ -80,11 +75,17 @@ def placeholder_name(M, f, block_size : int, processors : int):
     A_k_s_list = []
     f_k_s_list = []
     
-    for _ in range(processors):
+    for i in range(processors):
         # Perform the forward step
-        M_copy = M[row_index_start:row_index_end, col_index_start:col_index_end]
-        f_copy = f[row_index_start:row_index_end]
+        M_copy = M[
+            block_size*(nbyp*i+1):block_size*(nbyp*(i+1)+1),
+            block_size*(nbyp*i):block_size*(nbyp*(i+1)+1)
+        ]
+        f_copy = f[
+            block_size*(nbyp*i+1):block_size*(nbyp*(i+1)+1)
+        ]
         M_k, f_k, B_k_s, A_k_s, f_k_s = forward_placeholder(M_copy, f_copy, block_size, processors, [], [], [])
+        #print("One Forward complete ##############################")
 
         # Store the results for inter-processor communication
         M_k_list.append(M_k)
@@ -95,11 +96,6 @@ def placeholder_name(M, f, block_size : int, processors : int):
         A_k_s_list.append(A_k_s)
         f_k_s_list.append(f_k_s)
 
-        # Update the indices for the next processor
-        row_index_start = row_index_end
-        row_index_end += nbyp*block_size 
-        col_index_start = col_index_end - block_size
-        col_index_end += block_size*nbyp
     
     x0 = spsolve(M[:block_size,:block_size],f[:block_size]) # The master of all processors
     base_case_x = [x0]
@@ -121,68 +117,267 @@ def placeholder_name(M, f, block_size : int, processors : int):
         f_k_s = f_k_s_list[i] 
 
         x_for_current_processor = backward_placeholder(B_k_s, A_k_s, f_k_s, base_case_x[i:i+2], number_of_steps, block_size, processors)
-        #x_for
         final_x = np.concatenate((final_x, x_for_current_processor))
 
     final_x = np.concatenate((final_x, base_case_x[-1]))
     return final_x
         
-def forward_placeholder(M, f, block_size : int, processors : int, B_s = [], A_s = [], f_s = []):
-    n,m = M.shape
-    if n == block_size:
-        return M,f,B_s,A_s,f_s
+# def forward_placeholder(M, f, block_size : int, processors : int, B_s = [], A_s = [], f_s = []):
+#     m = M.shape[0]//block_size
+#     if m == 1:
+#         return M,f,B_s,A_s,f_s
     
-    M_next = csr_matrix((n//2,n//2+block_size))
-    f_next = np.zeros(n//2)
-    # Do one step
-    for i in range(0,n,2*block_size):
-        # Extract block elements from input
-        B1 = M[i:i+block_size, i:i+block_size] 
-        A1 = M[i:i+block_size, i + block_size: i + 2*block_size] 
-        B2 = M[i + block_size: i + 2*block_size,i + block_size: i + 2*block_size ]
-        A2 = M[i + block_size: i + 2*block_size,i + 2*block_size: i + 3*block_size]
-        f1 = f[i:i+block_size]
-        f2 = f[i + block_size: i + 2*block_size]
+    
+#     M_next = csr_matrix((block_size*m//2,block_size*m//2+block_size))
+#     f_next = np.zeros(block_size*m//2)
+#     I = np.eye(block_size)
+#     # Do one step
+#     for i in range(0,m,2):
+#         # Extract block elements from input
+#         B1 = M[
+#             block_size*i:block_size*(i+1), 
+#             block_size*i:block_size*(i+1)
+#             ] 
+#         A1 = M[
+#             block_size*i:block_size*(i+1), 
+#             block_size*(i+1):block_size*(i+2)
+#             ] 
+#         B2 = M[
+#             block_size*(i+1):block_size*(i+2),
+#             block_size*(i+1):block_size*(i+2)
+#             ]
+#         A2 = M[
+#             block_size*(i+1):block_size*(i+2),
+#             block_size*(i+2):block_size*(i+3)
+#             ]
+#         f1 = f[block_size*i:block_size*(i+1)]
+#         f2 = f[block_size*(i+1):block_size*(i+2)]
 
-        # Store the values for the backward step
-        B_s.append(B1)
-        A_s.append(A1)
-        f_s.append(f1)
+#         # Store the values for the backward step
+#         B_s.append(B1)
+#         A_s.append(A1)
+#         f_s.append(f1)
 
-        ####################
-        # Convert blocks to dense arrays if they aren’t already.
-        B1_dense = B1.toarray() if hasattr(B1, "toarray") else B1
-        A1_dense = A1.toarray() if hasattr(A1, "toarray") else A1
-        B2_dense = B2.toarray() if hasattr(B2, "toarray") else B2
-        A2_dense = A2.toarray() if hasattr(A2, "toarray") else A2
-        f1_dense = f1.toarray() if hasattr(f1, "toarray") else f1
-        f2_dense = f2.toarray() if hasattr(f2, "toarray") else f2
+    
+#         A1_inv = spsolve(A1, I)
+#         B2A1_inv = B2@A1_inv
+#         new_B1 = B2A1_inv@B1
+#         new_A1 = -A2
+#         new_f1 = B2A1_inv@f1 - f2
+#         # Set the new values to obtain a reduced system of half the original size
+#         j = i//2
+#         M_next[block_size*j:block_size*(j+1),block_size*j:block_size*(j+1)] = new_B1
+#         M_next[block_size*j:block_size*(j+1),block_size*(j+1):block_size*(j+2)] = new_A1
+#         f_next[block_size*j:block_size*(j+1)] = new_f1.flatten()
 
-        # Use LU factorization with pivoting to "solve" for the necessary inverses.
-        lu_A1, piv_A1 = lu_factor(A1_dense)
-        lu_B2, piv_B2 = lu_factor(B2_dense)
+#     # Recursively apply the same procedure
+#     return forward_placeholder(M_next,f_next,block_size,processors,B_s,A_s,f_s)
 
-        # Instead of explicitly forming inverses, we solve linear systems:
-        new_B1 = lu_solve((lu_A1, piv_A1), B1_dense)
-        new_A1 = -lu_solve((lu_B2, piv_B2), A2_dense)
-        new_f1 = lu_solve((lu_A1, piv_A1), f1_dense) - lu_solve((lu_B2, piv_B2), f2_dense)
-        ####################
+# def forward_placeholder(M, f, block_size: int, processors: int, B_s=None, A_s=None, f_s=None):
+#     """
+#     Performs the forward reduction step iteratively (instead of recursively)
+#     for block cyclic reduction.
+    
+#     Parameters:
+#     -----------
+#     M : scipy.sparse.csr_matrix
+#         The current block matrix.
+#     f : numpy.ndarray
+#         The current right-hand side vector.
+#     block_size : int
+#         The size of each block.
+#     processors : int
+#         The number of processors (unused in this iterative version, but kept for compatibility).
+#     B_s, A_s, f_s : list, optional
+#         Lists to store the blocks and right-hand sides needed for the backward step.
+        
+#     Returns:
+#     --------
+#     M, f, B_s, A_s, f_s : tuple
+#         The reduced matrix and right-hand side, along with the lists needed for the backward step.
+#     """
+#     # Initialize storage lists if they are not provided.
+#     if B_s is None:
+#         B_s = []
+#     if A_s is None:
+#         A_s = []
+#     if f_s is None:
+#         f_s = []
 
-        # Compute inverses and values for the next depth. This is equivalent to removing all odd indices from the input
-        # B2_inv = inv(B2)
-        # A1_inv = inv(A1)
-        # new_B1 = A1_inv@B1
-        # new_A1 = -B2_inv@A2
-        # new_f1 = A1_inv@f1 - B2_inv@f2
+#     # Continue reducing until the number of blocks m becomes 1.
+#     while True:
+#         m = M.shape[0] // block_size
+#         if m == 1:
+#             break
 
-        # Set the new values to obtain a reduced system of half the original size
-        j = i//2
-        M_next[j:j+block_size,j:j+block_size] = new_B1
-        M_next[j:j+block_size,j+block_size:j+2*block_size] = new_A1
-        f_next[j:j+block_size] = new_f1.flatten()
+#         num_new_blocks = m // 2
+#         # The new system will have:
+#         #   - rows: block_size * (m//2)
+#         #   - columns: block_size * ((m//2) + 1)
+#         M_next = csr_matrix((block_size * num_new_blocks, block_size * (num_new_blocks + 1)))
+#         f_next = np.zeros(block_size * num_new_blocks)
+#         I = np.eye(block_size)
 
-    # Recursively apply the same procedure
-    return forward_placeholder(M_next,f_next,block_size,processors,B_s,A_s,f_s)
+#         # Process two blocks at a time.
+#         for i in range(0, m, 2):
+#             # Extract blocks from M and corresponding segments from f.
+#             B1 = M[ block_size * i       : block_size * (i + 1),
+#                     block_size * i       : block_size * (i + 1)]
+#             A1 = M[ block_size * i       : block_size * (i + 1),
+#                     block_size * (i + 1) : block_size * (i + 2)]
+#             B2 = M[ block_size * (i + 1) : block_size * (i + 2),
+#                     block_size * (i + 1) : block_size * (i + 2)]
+#             A2 = M[ block_size * (i + 1) : block_size * (i + 2),
+#                     block_size * (i + 2) : block_size * (i + 3)]
+#             f1 = f[ block_size * i       : block_size * (i + 1)]
+#             f2 = f[ block_size * (i + 1) : block_size * (i + 2)]
+
+#             # Save blocks needed for the backward step.
+#             B_s.append(B1)
+#             A_s.append(A1)
+#             f_s.append(f1)
+
+#             # Solve for the new block coefficients.
+#             A1_inv = spsolve(A1, I)
+#             B2A1_inv = B2 @ A1_inv
+#             new_B1 = B2A1_inv @ B1
+#             new_A1 = -A2
+#             new_f1 = B2A1_inv @ f1 - f2
+
+#             j = i // 2  # New block index.
+#             # Assign computed blocks into the new matrix.
+#             M_next[ block_size * j       : block_size * (j + 1),
+#                     block_size * j       : block_size * (j + 1)] = new_B1
+#             M_next[ block_size * j       : block_size * (j + 1),
+#                     block_size * (j + 1) : block_size * (j + 2)] = new_A1
+#             f_next[ block_size * j : block_size * (j + 1)] = new_f1.flatten()
+
+#         # Update M and f for the next iteration.
+#         M, f = M_next, f_next
+
+#     return M, f, B_s, A_s, f_s
+
+
+def forward_placeholder(M, f, block_size: int, processors: int, B_s=None, A_s=None, f_s=None):
+    """
+    Performs the forward reduction step iteratively for block cyclic reduction,
+    building the new system matrix by accumulating data rather than using slice assignments.
+
+    Parameters:
+    -----------
+    M : scipy.sparse.csr_matrix
+        The current block matrix.
+    f : numpy.ndarray
+        The current right-hand side vector.
+    block_size : int
+        The size of each block.
+    processors : int
+        The number of processors (unused in this iterative version, but kept for compatibility).
+    B_s, A_s, f_s : list, optional
+        Lists to store the blocks and right-hand sides needed for the backward step.
+        
+    Returns:
+    --------
+    M, f, B_s, A_s, f_s : tuple
+        The reduced matrix and right-hand side, along with the lists needed for the backward step.
+    """
+    # Initialize storage lists if they are not provided.
+    if B_s is None:
+        B_s = []
+    if A_s is None:
+        A_s = []
+    if f_s is None:
+        f_s = []
+
+    # Continue reducing until the number of blocks m becomes 1.
+    while True:
+        m = M.shape[0] // block_size
+        if m == 1:
+            break
+
+        num_new_blocks = m // 2
+        # The new system will have:
+        #   - rows: block_size * (m//2)
+        #   - columns: block_size * ((m//2) + 1)
+        n_rows = block_size * num_new_blocks
+        n_cols = block_size * (num_new_blocks + 1)
+        
+        # Prepare lists to accumulate nonzero values and their row and column indices.
+        data = []
+        rows = []
+        cols = []
+        # Also, accumulate new right-hand side blocks.
+        f_next_list = []
+        
+        I = np.eye(block_size)
+
+        # Process two blocks at a time.
+        for i in range(0, m, 2):
+            # Extract blocks from M and corresponding segments from f.
+            B1 = M[ block_size * i       : block_size * (i + 1),
+                    block_size * i       : block_size * (i + 1)]
+            A1 = M[ block_size * i       : block_size * (i + 1),
+                    block_size * (i + 1) : block_size * (i + 2)]
+            B2 = M[ block_size * (i + 1) : block_size * (i + 2),
+                    block_size * (i + 1) : block_size * (i + 2)]
+            A2 = M[ block_size * (i + 1) : block_size * (i + 2),
+                    block_size * (i + 2) : block_size * (i + 3)]
+            f1 = f[ block_size * i       : block_size * (i + 1)]
+            f2 = f[ block_size * (i + 1) : block_size * (i + 2)]
+
+            # Save blocks needed for the backward step.
+            B_s.append(B1)
+            A_s.append(A1)
+            f_s.append(f1)
+
+            # Solve for the new block coefficients.
+            A1_inv = spsolve(A1, I)
+            B2A1_inv = B2 @ A1_inv
+            new_B1 = B2A1_inv @ B1
+            new_A1 = -A2
+            new_f1 = B2A1_inv @ f1 - f2
+
+            j = i // 2  # New block index.
+
+            # --- Accumulate entries for new_B1 ---
+            # new_B1 occupies rows [block_size*j, block_size*(j+1))
+            # and columns [block_size*j, block_size*(j+1))
+            r_offset = block_size * j
+            c_offset = block_size * j
+            for r in range(block_size):
+                for c in range(block_size):
+                    val = new_B1[r, c]
+                    # Only store nonzero entries.
+                    if val != 0:
+                        data.append(val)
+                        rows.append(r_offset + r)
+                        cols.append(c_offset + c)
+
+            # --- Accumulate entries for new_A1 ---
+            # new_A1 occupies rows [block_size*j, block_size*(j+1))
+            # and columns [block_size*(j+1), block_size*(j+2))
+            r_offset = block_size * j
+            c_offset = block_size * (j + 1)
+            for r in range(block_size):
+                for c in range(block_size):
+                    val = new_A1[r, c]
+                    if val != 0:
+                        data.append(val)
+                        rows.append(r_offset + r)
+                        cols.append(c_offset + c)
+
+            # Accumulate the new right-hand side block.
+            f_next_list.append(new_f1.flatten())
+
+        # Build the new CSR matrix in one go.
+        M_next = csr_matrix((data, (rows, cols)), shape=(n_rows, n_cols))
+        f_next = np.concatenate(f_next_list)
+
+        # Update M and f for the next iteration.
+        M, f = M_next, f_next
+
+    return M, f, B_s, A_s, f_s
+
 
 def backward_placeholder(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int, processors : int):
     x_result = x_s[0]
@@ -212,8 +407,15 @@ if __name__ == "__main__":
     block_size = 4
     number_of_processors = 8
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
-    number_of_blocks_list = [33]
+    number_of_blocks_list = [1025]
     # Load pre-generated matrix and RHS vector
+    cprofiler = True
+
+    if cprofiler:
+        profiler = cProfile.Profile()
+        profiler.enable()
+        processes = [1]
+
     for number_of_blocks in number_of_blocks_list:
         print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}")
         save_folder = f"Samples_to_test"
@@ -223,3 +425,8 @@ if __name__ == "__main__":
         end = time.time()
         print(f"Time taken: {end-start} seconds")
         print("Error,", np.linalg.norm(x - x_sol))
+    
+    if cprofiler:
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumulative')
+        stats.sort_stats("time").print_stats(20)
