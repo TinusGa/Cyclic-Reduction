@@ -1,3 +1,6 @@
 # Ignore the sparse_harmonic folder
 #sparse_harmonic/
+CR_v1/sparse_harmonic_new/
+CR_v1/sparse_harmonic_new
+/CR_v1/sparse_harmonic_new/
 .venv/
