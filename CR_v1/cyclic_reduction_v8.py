@@ -355,12 +355,13 @@ if __name__ == "__main__":
     #Ns = [16385,32769,65537,131073,262145,524289]
     Ns = [17,33,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
     #Ns = [17,33,129,257,513,1025,2049,4097,8193,16385]
-    #processes = [8]
-    processes = [1,2,4,8,16]
+    Ns = [8193]
+    processes = [1]
+    #processes = [1,2,4,8,16]
 
     test_problem = False
-    print_to_terminal = False
-    print_parallel_and_sequential_time = False
+    print_to_terminal = True
+    print_parallel_and_sequential_time = True
     write_to_csv = True
     cprofiler = False
 
