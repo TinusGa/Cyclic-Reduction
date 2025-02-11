@@ -14,11 +14,11 @@ import os
 from tqdm import tqdm
 import gdown
 
-import_remote_test_files = True
+import_remote_test_files = False
 
 if import_remote_test_files:
-    url = "https://drive.google.com/drive/folders/1HWFHKCprFzR7H7TYhrE-W7v4bz2Vc7Ia"
-    gdown.download_folder(url, quiet=True, use_cookies=False)
+    url = "https://drive.google.com/drive/folders/1vn43DDPY476qQaqk5judsv38_AehsPW_"
+    gdown.download_folder(url, quiet=True, use_cookies=False, resume=True)
 
 def create_full_permutation_matrix(m, block_size):
     num_blocks = m // block_size
@@ -76,104 +76,76 @@ def BCR(M, f, block_size : int, processors : int):
     assert ((nbyp & (nbyp-1) == 0) and nbyp != 0), f"M must have size (n+1)*block_size x (n+1)*block_size, where n = p * 2**k. n/p is not a power of two."
     number_of_steps = int(np.log2(nbyp)) # Number of steps in the forward step and backward step for each processor
     
-    # Divide among the processors
+    # Intialize storage lists for the forward step
     M_k_list = []
     f_k_list = []
     B_k_s_list = []
     A_k_s_list = []
     f_k_s_list = []
 
-    for i in range(processors):
-        start = time.time()
-        # Perform the forward step
-        M_list_copy = [] # [ [B1, A1], [B2, A2], ... ]
-        f_list_copy = [] # [f1, f2, ...]
-        start_row = block_size*(nbyp*i+1)
-        end_row = block_size*(nbyp*(i+1)+1)
-      
-        rows = M[start_row:end_row].toarray()
-        for j in range(start_row, end_row, block_size):
-            rel = j - start_row  
-            B1 = rows[rel:rel+block_size, j - block_size:j]
-            A1 = rows[rel:rel+block_size, j:j+block_size]
-            M_list_copy.append([B1, A1])
-            f_list_copy.append(f[j:j+block_size])
+    # Prepare arguments for the forward step
+
+    forward_reduction_args = [(M,f,block_size,nbyp,processor,processors) for processor in range(processors)]
+
+    # Begin multiprocessing
+    with Pool(processors) as pool:
+
+        # Perform the forward step in parallel
+        forward_reduction_results = pool.starmap(forward_reduction, forward_reduction_args)
+
+        # Collect the results from the forward step
+        for M_k, f_k, B_k_s, A_k_s, f_k_s in forward_reduction_results:
+            M_k_list.append(M_k)
+            f_k_list.append(f_k)
+            B_k_s_list.append(B_k_s)
+            A_k_s_list.append(A_k_s)
+            f_k_s_list.append(f_k_s)
         
+        # Solve the base case
+        x0 = spsolve(M[:block_size,:block_size],f[:block_size]) # The master of all processors
+        base_case_x = [x0]
 
-        build_time += time.time() - start
-        # Keep in case we need this later!
-        # for j in range(start_row, end_row, block_size):
-        #     row = M[j:j+block_size].toarray()
-        #     M_list_copy.append([row[:,j-block_size:j], row[:,j:j+block_size]])
-        # for j in range(start_row, end_row, block_size):
-        #     f_list_copy.append(f[j:j+block_size])
-
-        start = time.time()
-        M_k, f_k, B_k_s, A_k_s, f_k_s = forward_reduction(M_list_copy, f_list_copy, block_size, processors)
-        forward_time += time.time() - start
-        # Store the results for inter-processor communication
-        M_k_list.append(M_k)
-        f_k_list.append(f_k)
-
-        # Store the results for the backward step
-        B_k_s_list.append(B_k_s)
-        A_k_s_list.append(A_k_s)
-        f_k_s_list.append(f_k_s)
+        # Only serial part of the algorithm
+        for i in range(processors):
+            B_k = M_k_list[i][0]
+            A_k = M_k_list[i][1]
+            f_k = f_k_list[i]
+            x_next = np.linalg.solve(A_k,f_k.flatten()-B_k@base_case_x[i])
+            base_case_x.append(x_next)
     
-    x0 = spsolve(M[:block_size,:block_size],f[:block_size]) # The master of all processors
-    base_case_x = [x0]
+        final_x = np.array([])
 
-    # Only serial part of the algorithm
-    for i in range(processors):
-        B_k = M_k_list[i][0]
-        A_k = M_k_list[i][1]
-        f_k = f_k_list[i]
-        x_next = np.linalg.solve(A_k,f_k.flatten()-B_k@base_case_x[i])
-        base_case_x.append(x_next)
-    
-    final_x = np.array([])
+        backsubstitution_args = [(B_k_s_list[i], A_k_s_list[i], f_k_s_list[i], base_case_x[i:i+2], number_of_steps, block_size, processors) for i in range(processors)]
 
-    # Perform the backward step
-    for i in range(processors):
-        B_k_s = B_k_s_list[i] 
-        A_k_s = A_k_s_list[i] 
-        f_k_s = f_k_s_list[i] 
-        start = time.time()
-        x_for_current_processor = backsubstitution(B_k_s, A_k_s, f_k_s, base_case_x[i:i+2], number_of_steps, block_size, processors)
-        backward_time += time.time() - start
-        final_x = np.concatenate((final_x, x_for_current_processor))
+        # Perform the backward step in parallel
+        backsubstitution_results = pool.starmap(backsubstitution, backsubstitution_args)
+
+        # Collect the results from the backward step
+        for x in backsubstitution_results:
+            final_x = np.concatenate((final_x, x))
 
     final_x = np.concatenate((final_x, base_case_x[-1]))
-    print(f"Build time: {build_time} seconds")  
-    print(f"Forward time: {forward_time} seconds")
-    print(f"Backward time: {backward_time} seconds")
     return final_x
 
 
 #@njit
-def forward_reduction(M, f, block_size: int, processors: int):
+def forward_reduction(M, f, block_size: int, nbyp: int, processor: int, processors: int):
     """
-    Performs the forward reduction step iteratively for block cyclic reduction,
-    building the new system matrix by accumulating data rather than using slice assignments.
+    Perform the forward step of the block cyclic reduction algorithm.
+    """
+    M_current = [] # [ [B1, A1], [B2, A2], ... ]
+    f_current = [] # [f1, f2, ...]
+    start_row = block_size*(nbyp*processor+1)
+    end_row = block_size*(nbyp*(processor+1)+1)
+    
+    rows = M[start_row:end_row].toarray()
+    for j in range(start_row, end_row, block_size):
+        rel = j - start_row  
+        B1 = rows[rel:rel+block_size, j - block_size:j]
+        A1 = rows[rel:rel+block_size, j:j+block_size]
+        M_current.append([B1, A1])
+        f_current.append(f[j:j+block_size])
 
-    Parameters:
-    -----------
-    M : scipy.sparse.csr_matrix
-        The current block matrix.
-    f : numpy.ndarray
-        The current right-hand side vector.
-    block_size : int
-        The size of each block.
-    processors : int
-        The number of processors (unused in this iterative version, but kept for compatibility).
-    B_s, A_s, f_s : list, optional
-        Lists to store the blocks and right-hand sides needed for the backward step.
-        
-    Returns:
-    --------
-    M, f, B_s, A_s, f_s : tuple
-        The reduced matrix and right-hand side, along with the lists needed for the backward step.
-    """
     # Initialize storage lists if they are not provided.
     B_s = []
     A_s = []
@@ -181,24 +153,13 @@ def forward_reduction(M, f, block_size: int, processors: int):
 
     # Continue reducing until the number of blocks m becomes 1.
     while True:
-        m = len(M) # List now has size 1x2 i.e., [[B_k, A_k]]
+        m = len(M_current) # List now has size 1x2 i.e., [[B_k, A_k]]
         if m == 1:
             break
-
-        num_new_blocks = m // 2
-        # The new system will have:
-        #   - rows: block_size * (m//2)
-        #   - columns: block_size * ((m//2) + 1)
-        n_rows = block_size * num_new_blocks
-        n_cols = block_size * (num_new_blocks + 1)
         
-        # Prepare lists to accumulate nonzero values and their row and column indices.
-        data = []
-        rows = []
-        cols = []
         # Also, accumulate new right-hand side blocks.
-        M_next_list = []
-        f_next_list = []
+        M_next = []
+        f_next = []
         
         I = np.eye(block_size)
         
@@ -206,15 +167,15 @@ def forward_reduction(M, f, block_size: int, processors: int):
         for i in range(0, m, 2):
             # Extract the blocks B1, A1, B2, A2, and f1, f2 in pairs of rows from M and f.
 
-            row_1 = M[i]
-            row_2 = M[i+1]
+            row_1 = M_current[i]
+            row_2 = M_current[i+1]
             B1 = row_1[0]
             A1 = row_1[1]
             B2 = row_2[0]
             A2 = row_2[1]
 
-            f1 = f[i]
-            f2 = f[i+1]
+            f1 = f_current[i]
+            f2 = f_current[i+1]
 
             # Save blocks needed for the backward step.
             B_s.append(B1)
@@ -229,15 +190,15 @@ def forward_reduction(M, f, block_size: int, processors: int):
             new_A1 = -A2
             new_f1 = B2A1_inv @ f1 - f2
 
-            M_next_list.append([new_B1, new_A1])
+            M_next.append([new_B1, new_A1])
 
             # Accumulate the new right-hand side block.
-            f_next_list.append(new_f1.flatten())
+            f_next.append(new_f1.flatten())
 
         # Update M and f for the next iteration.
-        M, f = M_next_list, f_next_list
+        M_current, f_current = M_next, f_next
 
-    return M[0], f[0], B_s, A_s, f_s
+    return M_current[0], f_current[0], B_s, A_s, f_s
 
 
 def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int, processors : int):
@@ -291,10 +252,10 @@ def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int
     
 if __name__ == "__main__":
     block_size = 4
-    number_of_processors = 4
+    number_of_processors = 1
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
     number_of_blocks_list = [8193]
-    # Load pre-generated matrix and RHS vector
+
     cprofiler = False
 
     if cprofiler:
