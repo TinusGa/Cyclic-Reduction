@@ -246,9 +246,9 @@ def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int
     
 if __name__ == "__main__":
     block_size = 4
-    number_of_processors = 8
-    number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
-    number_of_blocks_list = [32769]
+    number_of_processors = [2,4,8,16]
+    number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
+    number_of_blocks_list = [131073]
 
     cprofiler = False
 
@@ -256,23 +256,23 @@ if __name__ == "__main__":
         profiler = cProfile.Profile()
         profiler.enable()
         processes = [1]
+    for p in number_of_processors:
+        for number_of_blocks in number_of_blocks_list:
+            print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}, processors = {p}")
+            save_folder = f"/work/tinuskg/BCR_v2"
+            M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
+            start = time.time()
+            x_sol = BCR(M,f,block_size=block_size,processors=p)
+            end = time.time()
+            print(f"Time taken: {end-start} seconds")
+            print("Error,", np.linalg.norm(x - x_sol))
 
-    for number_of_blocks in number_of_blocks_list:
-        print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}, processors = {number_of_processors}")
-        save_folder = f"/work/tinuskg/BCR_v2"
-        M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
-        start = time.time()
-        x_sol = BCR(M,f,block_size=block_size,processors=number_of_processors)
-        end = time.time()
-        print(f"Time taken: {end-start} seconds")
-        print("Error,", np.linalg.norm(x - x_sol))
-
-        start = time.time()
-        spsolve(M,f)
-        end = time.time()
-        print(f"Time taken SPSOLVE: {end-start} seconds")
-    
-    if cprofiler:
-        profiler.disable()
-        stats = pstats.Stats(profiler).sort_stats('cumulative')
-        stats.sort_stats("time").print_stats(20)
+            start = time.time()
+            spsolve(M,f)
+            end = time.time()
+            print(f"Time taken SPSOLVE: {end-start} seconds \n")
+        
+        if cprofiler:
+            profiler.disable()
+            stats = pstats.Stats(profiler).sort_stats('cumulative')
+            stats.sort_stats("time").print_stats(20)
