@@ -5,3 +5,4 @@ memory_profiler
 tqdm
 line_profiler
 numba
+gdown
