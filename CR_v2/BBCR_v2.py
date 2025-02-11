@@ -14,7 +14,7 @@ import os
 from tqdm import tqdm
 import gdown
 
-import_remote_test_files = False
+import_remote_test_files = True
 
 if import_remote_test_files:
     url = "https://drive.google.com/drive/folders/1HWFHKCprFzR7H7TYhrE-W7v4bz2Vc7Ia"
