@@ -12,6 +12,13 @@ import pstats
 import csv
 import os 
 from tqdm import tqdm
+import gdown
+
+import_remote_test_files = False
+
+if import_remote_test_files:
+    url = "https://drive.google.com/drive/folders/1HWFHKCprFzR7H7TYhrE-W7v4bz2Vc7Ia"
+    gdown.download_folder(url, quiet=True, use_cookies=False)
 
 def create_full_permutation_matrix(m, block_size):
     num_blocks = m // block_size
@@ -297,7 +304,7 @@ if __name__ == "__main__":
 
     for number_of_blocks in number_of_blocks_list:
         print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}")
-        save_folder = f"Samples_to_test"
+        save_folder = f"BCR_v2"
         M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
         start = time.time()
         x_sol = BCR(M,f,block_size=block_size,processors=number_of_processors)
