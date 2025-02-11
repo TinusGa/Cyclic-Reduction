@@ -246,7 +246,7 @@ def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int
     
 if __name__ == "__main__":
     block_size = 4
-    number_of_processors = 16
+    number_of_processors = 8
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
     number_of_blocks_list = [32769]
 
@@ -266,6 +266,11 @@ if __name__ == "__main__":
         end = time.time()
         print(f"Time taken: {end-start} seconds")
         print("Error,", np.linalg.norm(x - x_sol))
+
+        start = time.time()
+        spsolve(M,f)
+        end = time.time()
+        print(f"Time taken SPSOLVE: {end-start} seconds")
     
     if cprofiler:
         profiler.disable()
