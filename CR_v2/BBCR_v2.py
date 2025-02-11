@@ -37,7 +37,7 @@ def create_full_permutation_matrix(m, block_size):
 
     return csr_matrix((data, (rows, cols)), shape=(m, m))
 
-def placeholder_name(M, f, block_size : int, processors : int):
+def BCR(M, f, block_size : int, processors : int):
     """ 
     Performs Block Cyclic Reduction (BCR) in parallel for solving lower block bidiagonal systems.
 
@@ -77,17 +77,33 @@ def placeholder_name(M, f, block_size : int, processors : int):
     f_k_s_list = []
 
     for i in range(processors):
+        start = time.time()
         # Perform the forward step
-        M_copy = M[
-            block_size*(nbyp*i+1):block_size*(nbyp*(i+1)+1),
-            block_size*(nbyp*i):block_size*(nbyp*(i+1)+1)
-        ]
-        f_copy = f[
-            block_size*(nbyp*i+1):block_size*(nbyp*(i+1)+1)
-        ]
-        M_k, f_k, B_k_s, A_k_s, f_k_s = forward_placeholder(M_copy, f_copy, block_size, processors)
-        #print("One Forward complete ##############################")
+        M_list_copy = [] # [ [B1, A1], [B2, A2], ... ]
+        f_list_copy = [] # [f1, f2, ...]
+        start_row = block_size*(nbyp*i+1)
+        end_row = block_size*(nbyp*(i+1)+1)
+      
+        rows = M[start_row:end_row].toarray()
+        for j in range(start_row, end_row, block_size):
+            rel = j - start_row  
+            B1 = rows[rel:rel+block_size, j - block_size:j]
+            A1 = rows[rel:rel+block_size, j:j+block_size]
+            M_list_copy.append([B1, A1])
+            f_list_copy.append(f[j:j+block_size])
+        
 
+        build_time += time.time() - start
+        # Keep in case we need this later!
+        # for j in range(start_row, end_row, block_size):
+        #     row = M[j:j+block_size].toarray()
+        #     M_list_copy.append([row[:,j-block_size:j], row[:,j:j+block_size]])
+        # for j in range(start_row, end_row, block_size):
+        #     f_list_copy.append(f[j:j+block_size])
+
+        start = time.time()
+        M_k, f_k, B_k_s, A_k_s, f_k_s = forward_reduction(M_list_copy, f_list_copy, block_size, processors)
+        forward_time += time.time() - start
         # Store the results for inter-processor communication
         M_k_list.append(M_k)
         f_k_list.append(f_k)
@@ -102,10 +118,10 @@ def placeholder_name(M, f, block_size : int, processors : int):
 
     # Only serial part of the algorithm
     for i in range(processors):
-        B_k = M_k_list[i][:,:block_size]
-        A_k = M_k_list[i][:,block_size:]
+        B_k = M_k_list[i][0]
+        A_k = M_k_list[i][1]
         f_k = f_k_list[i]
-        x_next = spsolve(A_k,f_k.flatten()-B_k@base_case_x[i])
+        x_next = np.linalg.solve(A_k,f_k.flatten()-B_k@base_case_x[i])
         base_case_x.append(x_next)
     
     final_x = np.array([])
@@ -115,16 +131,20 @@ def placeholder_name(M, f, block_size : int, processors : int):
         B_k_s = B_k_s_list[i] 
         A_k_s = A_k_s_list[i] 
         f_k_s = f_k_s_list[i] 
-
-        x_for_current_processor = backward_placeholder(B_k_s, A_k_s, f_k_s, base_case_x[i:i+2], number_of_steps, block_size, processors)
+        start = time.time()
+        x_for_current_processor = backsubstitution(B_k_s, A_k_s, f_k_s, base_case_x[i:i+2], number_of_steps, block_size, processors)
+        backward_time += time.time() - start
         final_x = np.concatenate((final_x, x_for_current_processor))
 
     final_x = np.concatenate((final_x, base_case_x[-1]))
+    print(f"Build time: {build_time} seconds")  
+    print(f"Forward time: {forward_time} seconds")
+    print(f"Backward time: {backward_time} seconds")
     return final_x
 
 
 #@njit
-def forward_placeholder(M, f, block_size: int, processors: int):
+def forward_reduction(M, f, block_size: int, processors: int):
     """
     Performs the forward reduction step iteratively for block cyclic reduction,
     building the new system matrix by accumulating data rather than using slice assignments.
@@ -154,7 +174,7 @@ def forward_placeholder(M, f, block_size: int, processors: int):
 
     # Continue reducing until the number of blocks m becomes 1.
     while True:
-        m = M.shape[0] // block_size
+        m = len(M) # List now has size 1x2 i.e., [[B_k, A_k]]
         if m == 1:
             break
 
@@ -170,6 +190,7 @@ def forward_placeholder(M, f, block_size: int, processors: int):
         rows = []
         cols = []
         # Also, accumulate new right-hand side blocks.
+        M_next_list = []
         f_next_list = []
         
         I = np.eye(block_size)
@@ -178,18 +199,15 @@ def forward_placeholder(M, f, block_size: int, processors: int):
         for i in range(0, m, 2):
             # Extract the blocks B1, A1, B2, A2, and f1, f2 in pairs of rows from M and f.
 
-            # Index rows first (efficient for CSR matrices). Turn these into dense arrays for fast column slicing.
-            dense_row_1 = M[ block_size * i : block_size * (i + 1) ].toarray()
-            dense_row_2 = M[ block_size * (i + 1) : block_size * (i + 2) ].toarray()
-            
-            B1 = dense_row_1[:, block_size * i       : block_size * (i + 1)]
-            A1 = dense_row_1[:, block_size * (i + 1) : block_size * (i + 2)]   
-            B2 = dense_row_2[:, block_size * (i + 1) : block_size * (i + 2)]
-            A2 = dense_row_2[:, block_size * (i + 2) : block_size * (i + 3)]
+            row_1 = M[i]
+            row_2 = M[i+1]
+            B1 = row_1[0]
+            A1 = row_1[1]
+            B2 = row_2[0]
+            A2 = row_2[1]
 
-            # f remains dense so you can slice it directly:
-            f1 = f[ block_size * i       : block_size * (i + 1) ]
-            f2 = f[ block_size * (i + 1) : block_size * (i + 2) ]
+            f1 = f[i]
+            f2 = f[i+1]
 
             # Save blocks needed for the backward step.
             B_s.append(B1)
@@ -204,66 +222,71 @@ def forward_placeholder(M, f, block_size: int, processors: int):
             new_A1 = -A2
             new_f1 = B2A1_inv @ f1 - f2
 
-            j = i // 2  # New block index.
-            r_offset = block_size * j
-            for r in range(block_size):
-                for c in range(block_size):
-                    # Process new_B1: occupies columns [block_size*j, block_size*(j+1))
-                    val_b1 = new_B1[r, c]
-                    if val_b1 != 0:
-                        data.append(val_b1)
-                        rows.append(r_offset + r)
-                        cols.append(block_size * j + c)
-                    
-                    # Process new_A1: occupies columns [block_size*(j+1), block_size*(j+2))
-                    val_a1 = new_A1[r, c]
-                    if val_a1 != 0:
-                        data.append(val_a1)
-                        rows.append(r_offset + r)
-                        cols.append(block_size * (j + 1) + c)
+            M_next_list.append([new_B1, new_A1])
 
             # Accumulate the new right-hand side block.
             f_next_list.append(new_f1.flatten())
 
-        # Build the new CSR matrix in one go.
-        M_next = csr_matrix((data, (rows, cols)), shape=(n_rows, n_cols))
-        f_next = np.concatenate(f_next_list)
-
         # Update M and f for the next iteration.
-        M, f = M_next, f_next
+        M, f = M_next_list, f_next_list
 
-    return M, f, B_s, A_s, f_s
+    return M[0], f[0], B_s, A_s, f_s
 
 
-def backward_placeholder(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int, processors : int):
+def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int, processors : int):
     x_result = x_s[0]
     power = 0
     for i in range(number_of_steps-1,-1,-1):
         j = -(2**power - 1) if power > 0 else None
         k = -(2**(power+1) - 1)
 
-        B = B_s[k:j]
-        A = A_s[k:j]
-        f = f_s[k:j]
+        # Each of these is a list of blocks (dense arrays).
+        B_blocks = B_s[k:j]
+        A_blocks = A_s[k:j]
+        f_blocks = f_s[k:j]
 
-        A_for_solve = block_diag(A, format='csr')
-        B_for_solve = block_diag(B, format='csr')
-        f_for_solve = np.concatenate(f).flatten()
-        x_for_solve = x_result.copy()   
+        # Determine how many blocks we need to solve in this step.
+        num_step_blocks = len(A_blocks)
+        if num_step_blocks == 0:
+            break
 
-        x_new = spsolve(A_for_solve,f_for_solve - B_for_solve@x_for_solve)
+        x_for_solve = x_result.copy()
+        x_for_solve_blocks = [
+            x_for_solve[i * block_size: (i + 1) * block_size]
+            for i in range(num_step_blocks)
+        ]
 
-        x_result = np.concatenate((x_result,x_new))
-        Q = create_full_permutation_matrix(x_result.shape[0], block_size)
-        x_result = Q.T@x_result
+        # Solve each block: the block system is
+        #     A_blocks[i] * x_new_block = f_blocks[i] - B_blocks[i] @ (x_for_solve corresponding block)
+        x_new_list = []
+        for idx in range(num_step_blocks):
+            rhs = f_blocks[idx].flatten() - B_blocks[idx] @ x_for_solve_blocks[idx]
+            x_new_i = np.linalg.solve(A_blocks[idx], rhs)
+            x_new_list.append(x_new_i)
+        x_new = np.concatenate(x_new_list)
+
+        # Update x_result by concatenating the old solution with the newly computed blocks.
+        x_result = np.concatenate((x_result, x_new))
+
+        # Instead of building a permutation matrix, compute and apply permutation indices. Similar to Q.T @ x_result
+        m_total = x_result.shape[0]
+        num_blocks = m_total // block_size
+        even_blocks = np.arange(0, num_blocks, 2)
+        odd_blocks  = np.arange(1, num_blocks, 2)
+        forward_perm = np.concatenate((even_blocks, odd_blocks))
+        inv_perm = np.argsort(forward_perm)
+        new_indices = np.repeat(inv_perm, block_size) * block_size + np.tile(np.arange(block_size), num_blocks)
+
+        x_result = x_result[new_indices]
+
         power += 1
     return x_result
     
 if __name__ == "__main__":
     block_size = 4
-    number_of_processors = 8
+    number_of_processors = 4
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
-    number_of_blocks_list = [1025]
+    number_of_blocks_list = [8193]
     # Load pre-generated matrix and RHS vector
     cprofiler = False
 
@@ -277,7 +300,7 @@ if __name__ == "__main__":
         save_folder = f"Samples_to_test"
         M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
         start = time.time()
-        x_sol = placeholder_name(M,f,block_size=block_size,processors=number_of_processors)
+        x_sol = BCR(M,f,block_size=block_size,processors=number_of_processors)
         end = time.time()
         print(f"Time taken: {end-start} seconds")
         print("Error,", np.linalg.norm(x - x_sol))
