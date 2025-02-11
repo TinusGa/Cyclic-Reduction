@@ -14,12 +14,6 @@ import os
 from tqdm import tqdm
 import gdown
 
-import_remote_test_files = False
-
-if import_remote_test_files:
-    url = "https://drive.google.com/drive/folders/1vn43DDPY476qQaqk5judsv38_AehsPW_"
-    gdown.download_folder(url, quiet=True, use_cookies=False, resume=True)
-
 def create_full_permutation_matrix(m, block_size):
     num_blocks = m // block_size
     perm_order = []
@@ -252,9 +246,9 @@ def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int
     
 if __name__ == "__main__":
     block_size = 4
-    number_of_processors = 1
+    number_of_processors = 16
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073]
-    number_of_blocks_list = [8193]
+    number_of_blocks_list = [32769]
 
     cprofiler = False
 
@@ -264,8 +258,8 @@ if __name__ == "__main__":
         processes = [1]
 
     for number_of_blocks in number_of_blocks_list:
-        print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}")
-        save_folder = f"BCR_v2"
+        print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}, processors = {number_of_processors}")
+        save_folder = f"/work/tinuskg/BCR_v2"
         M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
         start = time.time()
         x_sol = BCR(M,f,block_size=block_size,processors=number_of_processors)
