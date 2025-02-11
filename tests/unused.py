@@ -1,77 +1,81 @@
-def construct_sparse_block_tridiagonal(current_a, current_b, current_c, block_size):
-    # Number of blocks
-    p = len(current_a)
-    
-    data, row, col = [], [], []
-    # Fill main diagonal blocks
-    for i in range(p):
-        start = i * block_size
-        block = current_a[i].tocoo()  # Convert each block to COO format for easy indexing
-        data.extend(block.data)
-        row.extend(block.row + start)
-        col.extend(block.col + start)
-    # Fill upper and lower diagonal blocks
-    for i in range(p - 1):
-        start_upper = i * block_size
-        start_lower = (i + 1) * block_size
-        
-        block_upper = current_b[i].tocoo()
-        data.extend(block_upper.data)
-        row.extend(block_upper.row + start_upper)
-        col.extend(block_upper.col + start_lower)
+import numpy as np
+from scipy.sparse import csr_matrix, csc_matrix, lil_matrix, vstack, hstack, save_npz, load_npz, block_diag, identity, random
+from scipy.sparse.linalg import inv, spsolve, splu
+from scipy.linalg import lu, lu_factor, lu_solve
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Pool, shared_memory
+import matplotlib.pyplot as plt
+import time
+import cProfile
+import pstats 
+import csv
+import os 
+from tqdm import tqdm
+import gdown
 
-        block_lower = current_c[i].tocoo()
-        data.extend(block_lower.data)
-        row.extend(block_lower.row + start_lower)
-        col.extend(block_lower.col + start_upper)
+def lower_block_bidiagonal_nonsingular(n_blocks, block_size):
+    """
+    Generate a nonsingular sparse lower block bidiagonal matrix in CSR format.
 
-    block_tridiagonal_matrix = csr_matrix((data, (row, col)), shape=(p * block_size, p * block_size))
-    return block_tridiagonal_matrix
+    Parameters:
+        n_blocks (int): Number of diagonal blocks.
+        block_size (int): Size of each square block.
 
+    Returns:
+        scipy.sparse.csr_matrix: The resulting nonsingular sparse matrix.
+        numpy.ndarray: The corresponding RHS vector.
+    """
+    N = n_blocks * block_size  # Total size of the matrix
+    data, row_indices, col_indices = [], [], []
 
-def construct_sparse_block_tridiagonal_direct(index, block_size, M, h):
-    # Initialize lists to store matrix data, rows, and columns
-    data, row, col = [], [], []
-    # Process the first block
-    if index == 0:
-        index_1, index_2, index_3, index_4 = get_index_main_M(0, block_size)
-        block_a = M[index_1:index_2, index_3:index_4].tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row)
-        col.extend(block_a.col)
-    else:
-        # First block for the main diagonal (empty if index != 0)
-        block_a = csr_matrix((block_size, block_size)).tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row)
-        col.extend(block_a.col)
-    
-    # Loop through all other blocks
-    for j in range(1, h + 1):
-        main_index = get_index_main_M(index * h + j, block_size)
-        upper_index = get_index_upper_M(index * h + j, block_size)
-        lower_index = get_index_lower_M(index * h + j, block_size)
+    # Generate diagonal (B_i) and lower diagonal (L_i) blocks
+    for i in range(n_blocks):
+        row_offset = i * block_size
+        col_offset = i * block_size
 
-        # Main diagonal block
-        block_a = M[main_index[0]:main_index[1], main_index[2]:main_index[3]].tocoo()
-        data.extend(block_a.data)
-        row.extend(block_a.row + j * block_size)
-        col.extend(block_a.col + j * block_size)
-        
-        # Upper diagonal block
-        block_c = M[upper_index[0]:upper_index[1], upper_index[2]:upper_index[3]].tocoo()
-        data.extend(block_c.data)
-        row.extend(block_c.row + (j-1) * block_size)
-        col.extend(block_c.col + j * block_size)
-        
-        # Lower diagonal block
-        block_b = M[lower_index[0]:lower_index[1], lower_index[2]:lower_index[3]].tocoo()
-        data.extend(block_b.data)
-        row.extend(block_b.row + j * block_size)
-        col.extend(block_b.col + (j-1) * block_size)
-    
-    # Construct the sparse block tridiagonal matrix
-    p = (h + 1)  # Total number of blocks in the main diagonal (including the first block)
-    block_tridiagonal_matrix = csr_matrix((data, (row, col)), shape=(p * block_size, p * block_size))
-    
-    return block_tridiagonal_matrix
+        # Ensure nonzero entries in the main diagonal block (B_i)
+        block_main = np.random.rand(block_size, block_size) + np.eye(block_size)  # Make B_i non-singular
+        for r in range(block_size):
+            for c in range(block_size):
+                val = block_main[r, c]
+                data.append(val)
+                row_indices.append(row_offset + r)
+                col_indices.append(col_offset + c)
+
+        # Lower block (L_i), ensuring nonzero entries
+        if i < n_blocks - 1:
+            row_offset = (i + 1) * block_size
+            col_offset = i * block_size
+            block_lower = np.random.rand(block_size, block_size) + 0.5*np.eye(block_size) # Random values ensure nonzero entries
+
+            for r in range(block_size):
+                for c in range(block_size):
+                    val = block_lower[r, c]
+                    data.append(val)
+                    row_indices.append(row_offset + r)
+                    col_indices.append(col_offset + c)
+
+    # Create sparse CSR matrix
+    sparse_matrix = csr_matrix((data, (row_indices, col_indices)), shape=(N, N))
+
+    # Generate a random RHS vector (column vector)
+    rhs_vector = np.random.rand(N, 1)  # Nx1 dense vector
+
+    return sparse_matrix, rhs_vector
+
+block_size = 4
+number_of_processors = 4
+
+#k_list = [4,5,6,7,8,9,10,11,12,13,14,15,16]
+k_list = [18]
+for k in tqdm(k_list):
+    n = int(number_of_processors*2**k)
+    number_of_blocks = n + 1
+    print(k)
+    print(number_of_blocks)
+    M, f = lower_block_bidiagonal_nonsingular(number_of_blocks, block_size)
+    x = spsolve(M,f)
+    save_folder = f"Samples_to_test"
+    save_npz(f"n{number_of_blocks}_b{block_size}_mat.npz",M)
+    np.save(f"n{number_of_blocks}_b{block_size}_rhs.npy",f)
+    np.save(f"n{number_of_blocks}_b{block_size}_sol.npy",x)
