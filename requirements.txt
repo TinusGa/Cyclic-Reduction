@@ -6,3 +6,4 @@ tqdm
 line_profiler
 numba
 gdown
+# \\markov.math.ntnu.no\work
