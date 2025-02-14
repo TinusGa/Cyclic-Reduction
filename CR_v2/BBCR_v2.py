@@ -78,16 +78,16 @@ def BCR(M, f, block_size : int, processors : int):
     f_k_s_list = []
 
     # Prepare arguments for the forward step
-
     forward_reduction_args = [(M,f,block_size,nbyp,processor,processors) for processor in range(processors)]
 
     # Begin multiprocessing
     with Pool(processors) as pool:
-
         # Perform the forward step in parallel
+        start = time.time()
         forward_reduction_results = pool.starmap(forward_reduction, forward_reduction_args)
-
+        print(f"Time to get forward results = {time.time()-start}")
         # Collect the results from the forward step
+
         for M_k, f_k, B_k_s, A_k_s, f_k_s in forward_reduction_results:
             M_k_list.append(M_k)
             f_k_list.append(f_k)
@@ -110,11 +110,13 @@ def BCR(M, f, block_size : int, processors : int):
         final_x = np.array([])
 
         backsubstitution_args = [(B_k_s_list[i], A_k_s_list[i], f_k_s_list[i], base_case_x[i:i+2], number_of_steps, block_size, processors) for i in range(processors)]
-
         # Perform the backward step in parallel
-        backsubstitution_results = pool.starmap(backsubstitution, backsubstitution_args)
 
+        start = time.time()
+        backsubstitution_results = pool.starmap(backsubstitution, backsubstitution_args)
+        print(f"Time to get backward results = {time.time()-start} \n")
         # Collect the results from the backward step
+
         for x in backsubstitution_results:
             final_x = np.concatenate((final_x, x))
 
@@ -130,13 +132,15 @@ def forward_reduction(M, f, block_size: int, nbyp: int, processor: int, processo
     M_current = [] # [ [B1, A1], [B2, A2], ... ]
     f_current = [] # [f1, f2, ...]
     start_row = block_size*(nbyp*processor+1)
-    end_row = block_size*(nbyp*(processor+1)+1)
-    
-    rows = M[start_row:end_row].toarray()
+    end_row = block_size*(nbyp*(processor+1)+1)    
+
     for j in range(start_row, end_row, block_size):
-        rel = j - start_row  
-        B1 = rows[rel:rel+block_size, j - block_size:j]
-        A1 = rows[rel:rel+block_size, j:j+block_size]
+        # Index the block for B1: rows j:j+block_size and columns (j-block_size):j
+        # and for A1: rows j:j+block_size and columns j:j+block_size.
+        # Only these small submatrices are converted to dense arrays.
+        B1 = M[j:j+block_size, j-block_size:j].toarray()
+        A1 = M[j:j+block_size, j:j+block_size].toarray()
+
         M_current.append([B1, A1])
         f_current.append(f[j:j+block_size])
 
@@ -247,8 +251,9 @@ def backsubstitution(B_s, A_s, f_s, x_s, number_of_steps : int, block_size : int
 if __name__ == "__main__":
     block_size = 4
     number_of_processors = [2,4,8,16]
+    number_of_processors = [1]
     number_of_blocks_list = [33,65,129,257,513,1025,2049,4097,8193,16385,32769,65537,131073,262145,524289]
-    number_of_blocks_list = [131073]
+    number_of_blocks_list = [16385]
 
     cprofiler = False
 
@@ -256,23 +261,25 @@ if __name__ == "__main__":
         profiler = cProfile.Profile()
         profiler.enable()
         processes = [1]
-    for p in number_of_processors:
-        for number_of_blocks in number_of_blocks_list:
-            print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}, processors = {p}")
-            save_folder = f"/work/tinuskg/BCR_v2"
-            M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
+    
+    for number_of_blocks in number_of_blocks_list:
+        print(f"M.shape = {number_of_blocks*block_size}x{number_of_blocks*block_size}")
+        save_folder = f"/work/tinuskg/BCR_v2"
+        M,f,x = load_npz(f"{save_folder}/n{number_of_blocks}_b{block_size}_mat.npz"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_rhs.npy"), np.load(f"{save_folder}/n{number_of_blocks}_b{block_size}_sol.npy")
+        start = time.time()
+        spsolve(M,f)
+        end = time.time()
+        print(f"Time taken SPSOLVE: {end-start} seconds \n")
+        for p in number_of_processors:
+            print(f"No. of processors: {p}")
             start = time.time()
             x_sol = BCR(M,f,block_size=block_size,processors=p)
             end = time.time()
             print(f"Time taken: {end-start} seconds")
-            print("Error,", np.linalg.norm(x - x_sol))
+            print("Error,", np.linalg.norm(x - x_sol),"\n")
 
-            start = time.time()
-            spsolve(M,f)
-            end = time.time()
-            print(f"Time taken SPSOLVE: {end-start} seconds \n")
-        
-        if cprofiler:
-            profiler.disable()
-            stats = pstats.Stats(profiler).sort_stats('cumulative')
-            stats.sort_stats("time").print_stats(20)
+
+    if cprofiler:
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumulative')
+        stats.sort_stats("time").print_stats(20)
